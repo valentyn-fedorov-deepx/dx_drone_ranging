@@ -1,0 +1,19 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+.ipynb_checkpoints/
+
+# data and products stay outside the repo (work_dir in the configs)
+*.mp4
+*.avi
+*.raw
+*.npz
+*.npy
+*.engine
+*.onnx
+*.pt
+*.pth
+runs/
+cache/
+out/
+/*_work/

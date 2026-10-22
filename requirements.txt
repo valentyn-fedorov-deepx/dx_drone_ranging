@@ -1,0 +1,16 @@
+# drone ranging (dronerange)
+numpy
+pandas
+scipy
+opencv-python>=4.8
+pyyaml
+pillow
+matplotlib
+ultralytics>=8.3        # YOLO + ByteTrack; installs torch (use a CUDA build of torch for speed)
+pytest
+
+# camera pipeline extras (camera/pipeline, camera/pose)
+# tensorrt>=10          # TensorRT engines for the real-time detection scheduler
+# onnxruntime-gpu
+# rtmlib                # RTMPose-x Halpe-26
+# openpifpaf==0.13.11   # optional car keypoints; build from the sdist without the torch==1.13.1 pin
