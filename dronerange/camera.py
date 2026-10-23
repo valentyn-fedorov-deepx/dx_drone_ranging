@@ -1,35 +1,60 @@
-"""Pinhole camera with one radial distortion term, and camera rays meeting the ground.
+"""Pinhole camera with lens distortion, and camera rays meeting the ground.
 
 Conventions
-    image: pixel (u right, v down), principal point at the image centre unless calibrated otherwise
+    image: pixel (u right, v down)
     camera frame: x right, y down, z = optical axis (OpenCV)
     world frame: ENU (x east, y north, z up); R_wc maps camera vectors to world vectors
-    distortion: x_d = x_u (1 + k1 r_u^2) in normalised coordinates; its first-order inverse is used for undistortion
+    distortion, two models:
+      - one radial term (in-flight self-calibration): x_d = x_u (1 + k1 r_u^2), principal point at the centre, first-order
+        inverse for undistortion (kept as it was so that the self-calibrated numbers reproduce)
+      - OpenCV (ChArUco lens calibration): dist = k1, k2, p1, p2, k3, fx / fy, free principal point, iterative inverse
 """
 from dataclasses import dataclass
 
+import cv2
 import numpy as np
+
+_UNDIST_CRIT = (cv2.TERM_CRITERIA_COUNT | cv2.TERM_CRITERIA_EPS, 50, 1e-12)
 
 
 @dataclass
 class Camera:
-    f: float
+    f: float                    # fx
     cx: float
     cy: float
     k1: float = 0.0
     width: int = 2048
     height: int = 1500
+    fy: float = None
+    dist: tuple = None          # OpenCV (k1, k2, p1, p2, k3); None = the one-term model
+
+    def __post_init__(self):
+        if self.fy is None:
+            self.fy = self.f
+        if self.dist is not None:
+            self.dist = tuple(float(x) for x in self.dist)
+            self.k1 = self.dist[0]
 
     @classmethod
     def from_calib(cls, c):
-        return cls(f=c["f_px"], cx=c["cx"], cy=c["cy"], k1=c.get("k1", 0.0), width=c.get("width", 2048), height=c.get("height", 1500))
+        W, H = c.get("width", 2048), c.get("height", 1500)
+        if c.get("dist") is not None:
+            return cls(f=c["fx"], fy=c["fy"], cx=c["cx"], cy=c["cy"], dist=c["dist"], width=W, height=H)
+        return cls(f=c["f_px"], cx=c["cx"], cy=c["cy"], k1=c.get("k1", 0.0), width=W, height=H)
+
+    @property
+    def opencv(self):
+        return self.dist is not None
 
     @property
     def K(self):
-        return np.array([[self.f, 0, self.cx], [0, self.f, self.cy], [0, 0, 1.0]])
+        return np.array([[self.f, 0, self.cx], [0, self.fy, self.cy], [0, 0, 1.0]])
 
     def normalised(self, px):
         px = np.atleast_2d(np.asarray(px, float))
+        if self.opencv:
+            q = cv2.undistortPointsIter(px.reshape(-1, 1, 2), self.K, np.array(self.dist), None, None, _UNDIST_CRIT).reshape(-1, 2)
+            return q[:, 0], q[:, 1]
         x = (px[:, 0] - self.cx) / self.f
         y = (px[:, 1] - self.cy) / self.f
         s = 1.0 / (1.0 + self.k1 * (x * x + y * y))
@@ -38,6 +63,9 @@ class Camera:
     def undistort(self, px):
         """distorted pixels -> ideal pinhole pixels"""
         px = np.atleast_2d(np.asarray(px, float))
+        if self.opencv:
+            x, y = self.normalised(px)
+            return np.c_[self.cx + self.f * x, self.cy + self.fy * y]
         x = (px[:, 0] - self.cx) / self.f
         y = (px[:, 1] - self.cy) / self.f
         s = 1.0 / (1.0 + self.k1 * (x * x + y * y))
@@ -55,7 +83,18 @@ class Camera:
         x = b[:, 0] / b[:, 2]
         y = b[:, 1] / b[:, 2]
         r2 = x * x + y * y
+        if self.opencv:
+            k1, k2, p1, p2, k3 = self.dist
+            rad = 1 + r2 * (k1 + r2 * (k2 + r2 * k3))
+            xd = x * rad + 2 * p1 * x * y + p2 * (r2 + 2 * x * x)
+            yd = y * rad + p1 * (r2 + 2 * y * y) + 2 * p2 * x * y
+            return np.c_[self.cx + self.f * xd, self.cy + self.fy * yd]
         return np.c_[self.cx + self.f * x * (1 + self.k1 * r2), self.cy + self.f * y * (1 + self.k1 * r2)]
+
+    def to_dict(self):
+        if self.opencv:
+            return dict(fx=self.f, fy=self.fy, cx=self.cx, cy=self.cy, dist=list(self.dist), width=self.width, height=self.height)
+        return dict(f_px=self.f, cx=self.cx, cy=self.cy, k1=self.k1, width=self.width, height=self.height)
 
 
 def world_rays(cam, R_wc, px):
@@ -100,3 +139,9 @@ def intersect_terrain(rays, cam_e, cam_n, cam_z, height_at, max_range=800.0, ste
         out[k] = (cam_e + r[0] * t, cam_n + r[1] * t, cam_z + r[2] * t)
         valid[k] = True
     return out[:, 0], out[:, 1], out[:, 2], valid
+
+
+def intersect_height(rays, h, z_above_ground):
+    """Rays from a camera h metres above the ground -> hit of the horizontal plane z_above_ground metres above the
+    ground (e.g. the middle of a car body); offsets relative to the nadir."""
+    return intersect_ground(rays, h - z_above_ground)

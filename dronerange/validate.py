@@ -6,7 +6,8 @@ A) pilot triangle: the pilot stands at the take-off point (= the ENU origin, fir
    the most detections). All low-hover person tracks are listed as well, with a crop sheet for a visual check.
 B) static-vehicle trilateration: a parked car seen from a moving drone (baseline >= 15 m) must sit at one point; the
    per-frame scatter of the ranged distances about the least-squares point measures the ranging noise. The implied
-   heading error (absolute bearing vs the trilaterated direction) measures the IMU yaw error.
+   heading error (absolute bearing vs the trilaterated direction) is kept only where the solution is unambiguous: from a
+   nearly straight drone path the point mirrored across the path fits the distances as well.
 """
 import numpy as np
 import pandas as pd
@@ -54,10 +55,15 @@ def trilateration(R, min_n=15, min_span=15.0):
         s = least_squares(f, x0, loss="soft_l1", f_scale=1.0)
         r = f(s.x)
         rel = r / g.D.values
+        # a nearly straight drone path leaves a mirror solution across it: the heading check needs an unambiguous one
+        P = np.c_[g.E_drone.values, g.N_drone.values]; c = P.mean(0); u = np.linalg.svd(P - c)[2][0]
+        v = s.x - c; s2 = least_squares(f, c + 2 * (v @ u) * u - v, loss="soft_l1", f_scale=1.0)
+        unambiguous = s2.cost > 2 * s.cost + 1 and np.hypot(*(s2.x - s.x)) > 5
         ang_tri = np.degrees(np.arctan2(s.x[0] - g.E_drone.values, s.x[1] - g.N_drone.values))
-        yaw_err = ((g.brg.values - ang_tri + 180) % 360) - 180
+        yaw_err = ((g.brg.values - ang_tri + 180) % 360) - 180 if unambiguous else np.full(len(g), np.nan)
         res.append(dict(track=tid, n=len(g), t0=g.t.min(), t1=g.t.max(), span=span, Dmed=g.D.median(), rms_m=np.sqrt(np.mean(r ** 2)),
-                        mad_rel=100 * 1.4826 * np.median(np.abs(rel - np.median(rel))), bias_rel=100 * np.median(rel), yaw_err=np.median(yaw_err)))
+                        mad_rel=100 * 1.4826 * np.median(np.abs(rel - np.median(rel))), bias_rel=100 * np.median(rel), yaw_err=np.median(yaw_err),
+                        unambiguous=bool(unambiguous)))
     return pd.DataFrame(res)
 
 

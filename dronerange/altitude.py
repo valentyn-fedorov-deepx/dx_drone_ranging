@@ -207,7 +207,11 @@ def build_track(sess, plan, gs, vo, telemetry=None):
         a, b = bounds[k]
         m = (tt >= a) & (tt < b)
         if m.any():
-            h[m] = value(k, tt[m]); src[m] = s.get("src", s["kind"])
+            v = value(k, tt[m])
+            if s.get("smooth_s"):                                    # rolling median inside the segment (odometry noise)
+                n = max(1, int(round(s["smooth_s"] / np.median(np.diff(tt)))))
+                v = pd.Series(v).rolling(n, center=True, min_periods=1).median().values
+            h[m] = v; src[m] = s.get("src", s["kind"])
     return pd.DataFrame(dict(frame=np.arange(len(tt)), t=tt, h=h, src=src))
 
 

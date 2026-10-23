@@ -10,8 +10,10 @@ data:
   imu: gnss/imu_gnss_2026_10_20_16_13_23.csv          # the decoded log; metadata/xsens_1792512803.bin works too
 work_dir: G:/dx_ranging_runs/drone2244_20261020
 enu_origin: [28.5536233, -81.5673233]                  # first GNSS fix = take-off point (the pilot stands next to it)
+position_smoothing_s: 5.0                              # drone position: GNSS low-passed + receiver velocity track
 
 calib:
+  lens: configs/cameras/drone2244_charuco.json         # ChArUco lens (2026-10-21, focus as flown); remove to self-calibrate f, k1
   width: 2048
   height: 1500
   bias_seconds: 12          # standstill on the ground at the start
@@ -32,6 +34,9 @@ calib:
   toff_grid_ms: [-200, 200, 10.0]
   f0_grid: [4200.0, 4900.0, 5600.0]
 
+attitude:
+  tilt_window_s: 10.0       # roll / pitch: gyro below this time scale, Xsens above (0 = Xsens as logged)
+
 altitude:
   pairs: {step: 5, min_disp_m: 2.5, max_gap: 60, start_frame: 75, sift_features: 4000, ratio: 0.75, ransac_px: 2.0}
   good: {max_normal_deg: 4, max_rank1: 0.15, min_inliers: 60, h_range: [2, 200], min_disp_m: 2.0}
@@ -48,12 +53,31 @@ altitude:
   telemetry: null           # {csv: path, t_col: t_unix, h_col: h_agl}: the drone's own height above ground replaces the plan
   cars_check: {start: 1000, end: 3960, step: 40, imgsz: 1536, conf: 0.35, width_m: 1.9}
 
+heading:
+  use: true                 # gyro yaw anchored by the visual motion direction (heading.csv); false = Xsens magnetic yaw
+  window_s: 30.0
+  min_anchors: 5
+  gap_s: 20.0
+
 detect:
   weights: G:/longrange_det/proto/weights/yolo11x.pt   # any ultralytics detector; "yolo11x.pt" downloads the stock one
   imgsz: 2048
   conf: 0.15
   classes: [0, 1, 2, 3, 5, 7]                          # person, bicycle, car, motorcycle, bus, truck
   tracker: bytetrack.yaml
+
+track: {}                  # worldtrack.DEFAULTS can be overridden here (process noise, gates, memory, moving test)
+
+map:
+  zoom: 19
+  margin_m: 150
+  tiles_url: https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}
+
+hud:
+  labels: auto              # full | compact | auto (full for people and moving objects, compact for parked vehicles)
+  map_min_m_per_px: 0.26
+  trail_s: 60
+  map_attribution: "Imagery: Esri, Maxar, Earthstar Geographics"
 
 validate:
   pilot_max_frame: 1300                                # low hover near the take-off point
@@ -66,5 +90,5 @@ terrain:
   grid_step_m: 10.0
 
 render:
-  carpark: {start: 1640, end: 2240, fps: 5, out: drone2244_radar_carpark.mp4}
-  full_2x: {start: 75, end: 3970, fps: 10, out: drone2244_radar_full_2x.mp4}
+  carpark: {start: 1640, end: 2240, fps: 5, out: drone2244_tracks_carpark.mp4}
+  full_2x: {start: 75, end: 3970, fps: 10, out: drone2244_tracks_full_2x.mp4}
