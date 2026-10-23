@@ -35,7 +35,7 @@ DEFAULTS = dict(
     max_miss_in_view_s=6.0, memory_static_s=1200.0, memory_moving_s=20.0,
     moving_window_s=4.0, moving_fast=3.0,                           # straight-line fit of the last 4 s (m/s), hysteresis:
     moving_on={"person": 0.8, "vehicle": 1.5, "bicycle": 1.0}, moving_off={"person": 0.45, "vehicle": 0.8, "bicycle": 0.6},
-    moving_per_m={"person": 0.01, "vehicle": 0.02, "bicycle": 0.015},   # far objects need more: on = max(moving_on, k * distance)
+    moving_per_m={"person": 0.01, "vehicle": 0.03, "bicycle": 0.015},   # far objects need more: on = max(moving_on, k * distance)
     nms_iou=0.6, nms_ios=0.75,
     bt_link_s=1.0, bt_gate=9.0,                                     # the image tracker's id continues a track seen this recently,
     bt_jump={"person": 2.0, "vehicle": 3.0, "bicycle": 2.5},        # if the ground point stays this close (m, plus speed * dt)

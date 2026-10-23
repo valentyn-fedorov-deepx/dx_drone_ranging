@@ -54,7 +54,7 @@ height plan (`altitude.track`).
 | heading | gyro yaw + 161 visual-GNSS anchors, residual 0 +- 1 deg; the Xsens magnetic yaw is off by up to 120 deg near the ground |
 | height track | 8.0 m low hover, 23-24 m car park, 31-36 m street, 26 m final hover (from the images: GNSS height unusable) |
 | detections / tracks | 15531 detections; 252 track ids (11 people, 241 vehicles) where ByteTrack had 1142; 45 ids in the 2 min car park hover |
-| moving test | parked vehicles shown as moving in 2.7 % of the car park frames; real traffic 20-45 km/h |
+| moving test | parked vehicles shown as moving in 2.2 % of the car park frames; real traffic 20-45 km/h |
 | pilot triangle | +6.4 / +1.5 / -0.7 / +0.8 / -7.9 % at 19-29 m |
 | static vehicles | 33 trilaterations from the moving drone: 2.6 % per-frame scatter, 0.2 % median bias |
 | terrain (USGS 3DEP) | flat: objects within -0.39..+0.35 m of the take-off ground, flat-ground error -3.0..+1.4 % |

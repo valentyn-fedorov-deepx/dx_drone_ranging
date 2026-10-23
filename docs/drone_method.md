@@ -150,12 +150,12 @@ the order of confirmation. A track outside the camera footprint is remembered (p
 again by position; an unobserved track coasts with its velocity damped (3 s).
 
 Moving test: a straight line through the last 4 s of measured positions; moving when its speed exceeds the class
-threshold (people 0.8 m/s, vehicles 1.5 m/s, growing with distance as 0.01 / 0.02 m/s per metre) and 3 standard
+threshold (people 0.8 m/s, vehicles 1.5 m/s, growing with distance as 0.01 / 0.03 m/s per metre) and 3 standard
 errors, still again below 0.45 / 0.8 m/s (or 1.5 standard errors). Speed and direction are reported only while moving (the raw filter speed stays in `speed_kf`); the video
 shows a vehicle as moving after 1 s of motion.
 
 Session 2026-10-20: 252 ids (11 people, 241 vehicles) where ByteTrack had 117 + 1025. Car park hover (2 min): 45 ids;
-of the image tracker's long tracks, 81 % of the frames stay on one ground track (98 % in the low hover); 2.7 % of the
+of the image tracker's long tracks, 81 % of the frames stay on one ground track (98 % in the low hover); 2.2 % of the
 parked-vehicle rows show as moving (they wander with the height and attitude errors). Two cars parked side by side
 can still swap ids. Real traffic shows 20-45 km/h at 100-125 m. Output `tracks.csv` (one row per frame and track:
 status seen / coast / memory, E, N, lat, lon, velocity, direction, Xo / Yo / Zo, range, ground distance, the matched
