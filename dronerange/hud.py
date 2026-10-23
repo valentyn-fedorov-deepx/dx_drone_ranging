@@ -253,7 +253,8 @@ def render(sess, R, T, track, mosaic, out, f0=0, f1=10 ** 9, fps=5.0, hud=None, 
             log("render", i)
     vw.release()
     try:
-        subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", tmp, "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "21", out], check=True)
+        subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", tmp, "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "21",
+                        "-movflags", "+faststart", out], check=True)    # faststart: plays while it downloads
         os.remove(tmp)
     except (OSError, subprocess.CalledProcessError):
         os.replace(tmp, out)
