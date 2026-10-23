@@ -191,3 +191,6 @@ footprint.
 - Past 100 m a 1 deg ray error is about 7 m of position: far objects can show a few km/h of false motion.
 - Flat ground is assumed unless the terrain model is used. Occluded contact points (feet behind a car) bias the
   distance long. The stock detector misses some people and dark cars from above.
+- The satellite imagery is older than the scene in places: west of the street the video shows a parking lot where the
+  imagery still has trees, so cars parked there sit "in the trees" on the map (the camera frame warped onto the
+  imagery puts the street exactly on the street).
