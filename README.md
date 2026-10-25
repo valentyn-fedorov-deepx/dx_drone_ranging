@@ -53,10 +53,10 @@ heading from it (`altitude.telemetry`, `position_source`, `heading.source: dji`;
 | camera-IMU (lens fixed) | gyro scale 1.0176 (the Xsens gyro reads 1.8 % low), IMU time offset -20.7 ms, residual 2.69 px; with f freed the fit returns fx 4843.8 px, the ChArUco value |
 | attitude | roll / pitch: gyro below 10 s, Xsens above (the Xsens alone is off by about 1 deg over seconds in hover) |
 | heading | gyro yaw + 161 visual-GNSS anchors, residual 0 +- 1 deg; the Xsens magnetic yaw is off by up to 120 deg near the ground |
-| height track | 8.0 m low hover, 23-24 m car park, 31-36 m street, 26 m final hover (from the images: GNSS height unusable) |
-| detections / tracks | 15531 detections; 252 track ids (11 people, 241 vehicles) where ByteTrack had 1142; 45 ids in the 2 min car park hover |
+| height track | 8.0 m low hover, 26-28 m car park, 31-36 m street, 25 m final hover (from the images: GNSS height unusable). Revised 2026-10-25: the odometry used to drop pairs during climbs and put the car park at 23-24 m, its distances 17 % short |
+| detections / tracks | 15531 detections; 244 track ids (11 people, 233 vehicles) where ByteTrack had 1142; 45 ids in the 2 min car park hover |
 | moving test | parked vehicles shown as moving in 2.2 % of the car park frames; real traffic 20-45 km/h |
-| pilot triangle | +6.4 / +1.5 / -0.7 / +0.8 / -7.9 % at 19-29 m |
+| pilot triangle | +6.4 / +1.5 / -0.7 / +0.8 / -0.3 % at 19-29 m (the last window sits on the odometry height: -7.9 % before the fix) |
 | static vehicles | 33 trilaterations from the moving drone: 2.6 % per-frame scatter, 0.2 % median bias |
 | terrain (USGS 3DEP) | flat: objects within -0.39..+0.35 m of the take-off ground, flat-ground error -3.0..+1.4 % |
 

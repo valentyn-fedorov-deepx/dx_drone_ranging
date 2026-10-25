@@ -105,8 +105,8 @@ track height here (0.82-0.88 in the first analysis), open until the drone's own 
 **Height track.** A per-session plan stitches the sources (config `altitude.track`): a constant for the low hover
 (7.9 m from GNSS displacement pairs), vertical odometry for the climb and the car park hover, a ramp where neither
 method sees the climb, the smoothed homography heights along the street, odometry continuing the last measured height
-in the final hover. Session 2026-10-20 with the ChArUco lens: 8.0 m low hover, 22.7-24.0 m car park, 31-36 m street,
-25.7 m final hover. `altitude.telemetry` (the flight controller's height) replaces the plan: the setup for live use.
+in the final hover. Session 2026-10-20 with the ChArUco lens: 8.0 m low hover, 26-28 m car park, 31-36 m street,
+25 m final hover (the car park was 23-24 m before the odometry fix). `altitude.telemetry` (the flight controller's height) replaces the plan: the setup for live use.
 
 **Aircraft telemetry.** With the aircraft's own flight log (a DJI record decoded to CSV, about 10 records a second)
 the height above the take-off point comes from its barometer (`altitude.telemetry`), the drone position from its GNSS
@@ -198,7 +198,8 @@ footprint.
 
 - **Pilot triangle.** The pilot stands at the take-off point (first GNSS fix); while he stands there, the ground
   distance to him must equal the GNSS distance drone -> take-off point. 5 windows in the low hover:
-  +6.4 / +1.5 / -0.7 / +0.8 / -7.9 % at 19-29 m (with the self-calibrated lens: +4.4 / +0.1 / -1.2 / +1.4 / -6.2 %).
+  +6.4 / +1.5 / -0.7 / +0.8 / -0.3 % at 19-29 m; the last window sits on the odometry height and was -7.9 % before
+  the odometry fix (with the self-calibrated lens: +4.4 / +0.1 / -1.2 / +1.4 / -6.2 %).
   He is the only person in the low hover; in his other tracks he walks around, so they do not count.
 - **Static-vehicle trilateration.** 33 parked cars seen from the moving drone (baseline >= 15 m): the distances meet
   in one point with 2.6 % per-frame scatter, 0.2 % median bias.
