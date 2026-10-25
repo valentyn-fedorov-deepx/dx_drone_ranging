@@ -5,6 +5,7 @@ Web Mercator is conformal, so over a few hundred metres the tile pixels are a un
 156543.034 cos(lat) / 2^zoom metres in both axes, and ENU metres map to mosaic pixels by a scale and an offset.
 """
 import math
+import time
 import os
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
@@ -46,15 +47,19 @@ class TileMosaic:
         def get(job):
             tx, ty = job
             p = cache / f"{tx}_{ty}.jpg"
-            if not p.exists():
-                req = urllib.request.Request(url.format(z=z, x=tx, y=ty), headers={"User-Agent": "dx_ranging/0.2 (drone demo map)"})
-                for _ in range(3):
-                    try:
-                        p.write_bytes(urllib.request.urlopen(req, timeout=20).read())
-                        break
-                    except Exception:
-                        pass
             im = cv2.imread(str(p)) if p.exists() else None
+            if im is None:                                          # missing or broken: fetch, write atomically, retry
+                req = urllib.request.Request(url.format(z=z, x=tx, y=ty), headers={"User-Agent": "dx_ranging/0.2 (drone demo map)"})
+                for k in range(4):
+                    try:
+                        tmp = p.with_name(f"{p.stem}.{os.getpid()}.part")
+                        tmp.write_bytes(urllib.request.urlopen(req, timeout=20).read())
+                        os.replace(tmp, p)
+                        im = cv2.imread(str(p))
+                        if im is not None:
+                            break
+                    except Exception:
+                        time.sleep(1.0 + k)
             return job, im
 
         n_new = sum(not (cache / f"{tx}_{ty}.jpg").exists() for tx, ty in jobs)

@@ -114,8 +114,19 @@ class Session:
         self.N_vel = np.r_[0, np.cumsum(0.5 * (vn[1:] + vn[:-1]) * np.diff(self.ti))]
         tau = cfg.get("position_smoothing_s", 5.0)                   # complementary filter: GNSS position (low) + velocity track (high)
         lp = lowpass if cfg.get("position_smoothing_causal", False) else lowpass_zero_phase
-        self.E_s = self.E_vel + lp(self.ti, self.E - self.E_vel, tau)
-        self.N_s = self.N_vel + lp(self.ti, self.N - self.N_vel, tau)
+        ps = cfg.get("position_source")
+        if ps and ps.get("source") == "dji":                         # the aircraft's own GNSS (the unit's receiver drifted)
+            from .telemetry import load
+            dji = load(cfg["data"][ps.get("log", "flight_log")], ps.get("t_col", "utc"), ps.get("offset_s", 0.0))
+            de, dn = self.latlon_to_en(dji.latitude.values, dji.longitude.values)
+            self.E = np.interp(self.ti, dji.t_unix.values, de)
+            self.N = np.interp(self.ti, dji.t_unix.values, dn)
+            self.E_vel = lowpass_zero_phase(self.ti, self.E, ps.get("smoothing_s", 1.0))
+            self.N_vel = lowpass_zero_phase(self.ti, self.N, ps.get("smoothing_s", 1.0))
+            self.E_s, self.N_s = self.E_vel, self.N_vel
+        else:
+            self.E_s = self.E_vel + lp(self.ti, self.E - self.E_vel, tau)
+            self.N_s = self.N_vel + lp(self.ti, self.N - self.N_vel, tau)
         self.heading = None                                          # HeadingModel: corrected yaw (see heading.py)
         self.gyro_scale = 1.0
         self.toff = 0.0
@@ -197,7 +208,16 @@ class Session:
         return Rot.from_euler("ZYX", [self.heading.yaw(t + self.toff), p, r], degrees=True).as_matrix()
 
     def R_wc(self, t):
-        return self.R_wb(t) @ self.R_bc
+        R = self.R_wb(t) @ self.R_bc
+        fixed = self.cfg.get("attitude", {}).get("fixed_depression_deg")
+        if fixed is None:
+            return R
+        # comparison mode / no IMU: the measured heading, a fixed tilt of the optical axis, the horizon level
+        ax = R @ np.array([0, 0, 1.0])
+        hd, d = math.atan2(ax[0], ax[1]), math.radians(fixed)
+        z = np.array([math.sin(hd) * math.cos(d), math.cos(hd) * math.cos(d), -math.sin(d)])
+        x = np.cross(z, [0, 0, 1.0]); x /= np.linalg.norm(x)
+        return np.c_[x, np.cross(z, x), z]
 
     def frame_R_wc(self, i):
         return self.R_wc(self.ft[i])

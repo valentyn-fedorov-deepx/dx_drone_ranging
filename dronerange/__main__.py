@@ -72,7 +72,12 @@ def cmd_heading(cfg, args, log):
     s = _session(cfg)
     Pd = pd.read_csv(C.work(cfg, "altitude_pairs.csv"))
     P = cfg.get("heading", {})
-    model, A, T = HD.fit(s, Pd, cfg["altitude"]["good"], P.get("window_s", 30.0), P.get("min_anchors", 5), P.get("gap_s", 20.0), log)
+    if P.get("source") == "dji":
+        from . import telemetry as TM
+        dji = TM.load(cfg["data"][P.get("log", "flight_log")], P.get("t_col", "utc"), P.get("offset_s", 0.0))
+        model, A, T = HD.fit_dji(s, Pd, cfg["altitude"]["good"], dji, P.get("yaw_col", "yaw_deg"), log)
+    else:
+        model, A, T = HD.fit(s, Pd, cfg["altitude"]["good"], P.get("window_s", 30.0), P.get("min_anchors", 5), P.get("gap_s", 20.0), log)
     T.to_csv(C.work(cfg, "heading.csv"), index=False)
     A.to_csv(C.work(cfg, "heading_anchors.csv"), index=False)
     HD.plot(C.work(cfg, "heading.png"), s, A, T)
@@ -88,7 +93,7 @@ def cmd_altitude(cfg, args, log):
     else:
         Pd = A.pairs(s, P["pairs"], log)
         Pd.to_csv(pp, index=False)
-    g = A.good_pairs(Pd, P["good"])
+    g = A.good_pairs(Pd, P["good"]) if len(Pd) else Pd
     log("GNSS+homography pairs", len(Pd), "good", len(g))
     vo = {}
     for name, r in (P.get("vo") or {}).items():
@@ -98,8 +103,12 @@ def cmd_altitude(cfg, args, log):
         else:
             vo[name] = A.vertical_odometry(s, r["start"], r["end"], r["h_start"], r["h_end"], r.get("step", 2), log)
             vo[name].to_csv(vp, index=False)
-    gs = A.smoothed_pairs(Pd, P["good"], P.get("smooth_window", 7))
-    T = A.build_track(s, P["track"], gs, vo, P.get("telemetry"))
+    gs = A.smoothed_pairs(Pd, P["good"], P.get("smooth_window", 7)) if len(Pd) else None
+    tel = P.get("telemetry")
+    if tel and tel.get("source"):
+        from . import telemetry as TM
+        tel = dict(tel, df=TM.load(cfg["data"][tel["source"]], tel.get("t_col", "utc"), tel.get("offset_s", 0.0)))
+    T = A.build_track(s, P.get("track") or [], gs, vo, tel)
     T.to_csv(C.work(cfg, "altitude_track.csv"), index=False)
     A.plot(C.work(cfg, "altitude.png"), s, Pd, P["good"], T, vo)
     for t0 in (100, 200, 260, 300, 400, 450, 470, 500, 600, 700, 790):

@@ -116,3 +116,36 @@ def plot(path, sess, A, T):
     ax[1].plot(A.t_imu - t0, A.c_raw, ".", ms=3, color="0.6", label="anchors")
     ax[1].set_ylabel("deg"); ax[1].grid(alpha=.3); ax[1].legend(fontsize=8); ax[1].set_xlabel("s from the first frame")
     plt.tight_layout(); plt.savefig(path, dpi=90); plt.close(fig)
+
+
+def fit_dji(sess, Pd, good, dji, yaw_col="yaw_deg", log=print):
+    """Heading from the aircraft's own log: the camera unit is fixed to the airframe, so its ENU yaw is
+    c0 - (DJI yaw, a compass bearing) with one constant c0 (the mount). c0 comes from the visual-GNSS anchors (moving
+    stretches); the gyro yaw is compared with the DJI yaw as a check of the sign and of the drift between them."""
+    from .telemetry import yaw_at
+    yd = yaw_at(dji, sess.ti, yaw_col)
+    yg = gyro_yaw(sess)
+    A = anchors_from_pairs(sess, Pd, good) if len(Pd) else pd.DataFrame(columns=["t_imu", "e_xsens", "yaw_xsens"])
+    if len(A):
+        A["yaw_dji"] = np.interp(A.t_imu, sess.ti, yd)
+        c = A.yaw_xsens + A.e_xsens + A.yaw_dji                     # yaw_true + bearing = c0
+        c0 = np.median(wrap(c))
+        A["c_raw"] = c0 + wrap(c - c0)
+        med = np.median(A.c_raw); mad = 1.4826 * np.median(np.abs(A.c_raw - med))
+        A["outlier"] = np.abs(A.c_raw - med) > max(3 * mad, 6.0)
+        c0 = float(np.median(A.c_raw[~A.outlier]))
+        A["c"] = c0
+        A["resid_after"] = wrap(A.yaw_xsens + A.e_xsens - (c0 - A.yaw_dji))
+        ok = ~A.outlier
+        log(f"heading from the DJI log: mount constant c0 {c0:.1f} deg from {int(ok.sum())} anchors (of {len(A)}), residual median "
+            f"{np.median(A.resid_after[ok]):+.1f}, MAD {1.4826 * np.median(np.abs(A.resid_after[ok] - np.median(A.resid_after[ok]))):.1f} deg")
+    else:
+        c0 = float(np.median(wrap(sess.eul[:, 2] + yd)))
+        log(f"heading from the DJI log: no visual anchors, mount constant from the Xsens yaw (unreliable): c0 {c0:.1f} deg")
+    yaw_used = c0 - yd
+    d = (yg - yg[0]) - (yaw_used - yaw_used[0])
+    tt = sess.ti - sess.ti[0]
+    b = np.polyfit(tt, d, 1)[0]
+    log(f"gyro yaw vs DJI yaw: drift {b * 60:+.2f} deg/min, scatter about the drift {np.std(d - np.polyval(np.polyfit(tt, d, 1), tt)):.2f} deg")
+    T = pd.DataFrame(dict(t_imu=sess.ti, yaw_xsens=sess.eul[:, 2], yaw_gyro=yg, c=np.full(len(yg), c0), yaw_used=yaw_used, yaw_dji=yd))
+    return HeadingModel(sess.ti, yaw_used), A, T

@@ -156,7 +156,9 @@ def vertical_odometry(sess, f0, f1, h0, h1, step=2, log=print):
             rows.append(rec)
         prev = cur
     V = pd.DataFrame(rows)
-    V["use"] = V.ok & (V.inl >= 60) & ((V.ang_n < 8) | (V.smax < 0.003))
+    # every pair with a homography counts: rejecting pairs whose plane normal disagrees with the IMU (as an earlier
+    # version did) dropped most of the pairs during climbs and lost a third of the climb (barometer check, 2026-10-23)
+    V["use"] = V.ok & (V.inl >= 60) & (V.dz_rel.abs() < 0.2)
     dz = np.where(V.use, V.dz_rel, 0.0)
     lnh = np.log(h0) + np.r_[0, np.cumsum(np.log1p(dz[:-1]))]
     lnh_end = np.log(h0) + np.sum(np.log1p(dz))
@@ -174,8 +176,12 @@ def build_track(sess, plan, gs, vo, telemetry=None):
     neighbouring segments' boundary values), vo_scaled (odometry run scaled to continue the previous segment)."""
     tt = sess.tt
     if telemetry is not None:
-        T = pd.read_csv(telemetry["csv"])
-        h = np.interp(sess.ft, T[telemetry.get("t_col", "t_unix")].values, T[telemetry.get("h_col", "h_agl")].values)
+        if "df" in telemetry:                                       # the aircraft log, loaded by telemetry.load
+            T = telemetry["df"]
+            h = np.interp(sess.ft, T.t_unix.values, T[telemetry.get("h_col", "height_above_takeoff_m")].values)
+        else:
+            T = pd.read_csv(telemetry["csv"])
+            h = np.interp(sess.ft, T[telemetry.get("t_col", "t_unix")].values, T[telemetry.get("h_col", "h_agl")].values)
         return pd.DataFrame(dict(frame=np.arange(len(tt)), t=tt, h=h, src="telemetry"))
     bounds, t0 = [], -np.inf
     for s in plan:

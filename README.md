@@ -42,7 +42,8 @@ the config.
 
 A new session needs a new config: data paths, `enu_origin` (take-off point), the lens file of the drone, the
 calibration frame range (hover at height), and either the drone's height telemetry (`altitude.telemetry`) or a
-height plan (`altitude.track`).
+height plan (`altitude.track`). With the aircraft's flight log (DJI) the config takes the height, the position and the
+heading from it (`altitude.telemetry`, `position_source`, `heading.source: dji`; see the 10-23 config).
 
 ## Drone: results for the 2026-10-20 flight (drone 2244)
 
@@ -58,6 +59,25 @@ height plan (`altitude.track`).
 | pilot triangle | +6.4 / +1.5 / -0.7 / +0.8 / -7.9 % at 19-29 m |
 | static vehicles | 33 trilaterations from the moving drone: 2.6 % per-frame scatter, 0.2 % median bias |
 | terrain (USGS 3DEP) | flat: objects within -0.39..+0.35 m of the take-off ground, flat-ground error -3.0..+1.4 % |
+
+## Drone: results for the 2026-10-23 flight (drone 2244 under a DJI Matrice 600 Pro)
+
+The drone flew to a drain in the car park, held its place and climbed 13.1 / 16.2 / 20.0 / 25.4 / 30.2 m (barometer).
+Config `configs/drone2244_20261023.yaml`; data: Drive folder `1Gb6XY5_x_GW-TTKCmbIlrM7LzVHH4vDW`.
+
+| quantity | value |
+|---|---|
+| height | the aircraft's barometer (DJI flight log, `altitude.telemetry`); its clock runs 1.25 s behind the unit's (speed cross-correlation 0.92) |
+| drone position | the aircraft's GNSS (`position_source: dji`): during the climbs the unit's own receiver drifted 18 m east while the aircraft held within 1 m |
+| heading | the aircraft's heading + one mount constant (-176.9 deg) from 19 visual-GNSS anchors, residual 1.7 deg (MAD) |
+| camera-IMU | lens fixed (ChArUco), hover at 30 m: time offset -18.9 ms, residual 3.5 px; R_bc within 0.6 deg of the 10-20 calibration (the IMU sits in the camera unit) |
+| camera tilt | measured 23-24 deg below the horizon in the holds, 24.3 deg on the ground before take-off (nominal "30 deg") |
+| absolute check | the near edge of the street in frame 2522: 86.4 m with the measured tilt, 82-85 m on the satellite imagery along the same ray; a fixed 30 deg would put it at 54 m. RVs across the street (130 m) land on the RV lot |
+| cross-height check | parked cars keep their place across the five heights: median deviation 0.7 m along the ray, 0.25 m across it; ground distances change by 2.0 % (median) with the measured tilt, 2.8 % with a fixed 30 deg |
+| tracks | 14036 detections; 59 ids (7 people, 52 vehicles) where ByteTrack had 596 |
+| odometry check | the visual vertical odometry against the barometer over the climbs: -27 % with the old pair rejection, -9 % after the fix (all pairs with a homography count) |
+
+`tools/tilt_test.py`, `tools/road_check.py` and `tools/overlay_check.py` reproduce the tilt checks.
 
 Method, formulas, error budget, the 45 deg mount and the limits: [docs/drone_method.md](docs/drone_method.md).
 

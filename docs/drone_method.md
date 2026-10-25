@@ -94,7 +94,9 @@ hover (about 1 m of travel) are garbage. The direction of `u_w` is not used as a
 magnetic heading is off by tens of degrees, the height is unaffected); it becomes the heading anchor in section 5.
 
 **Vertical odometry (hover).** The same model between frames two apart gives `dz / h = -u_w,z`, integrated in ln h
-from an anchor height.
+from an anchor height. Every pair with a homography counts: an earlier version dropped pairs whose plane normal
+disagreed with the IMU by more than 8 deg, which during climbs was most of them, and lost a third of the climb. Against
+the barometer (10-23, climbs 13.1 -> 30.2 m) the end height came out -27 % with that rejection and -9 % without it.
 
 **Car widths (check).** Rays through the bottom corners of parked-car boxes hit the ground at h = 1 m; the 10th
 percentile of those widths is the car width (1.9 m), so `h = 1.9 / w10`. A coarse scale check: it reads 0.80 x the
@@ -105,6 +107,13 @@ track height here (0.82-0.88 in the first analysis), open until the drone's own 
 method sees the climb, the smoothed homography heights along the street, odometry continuing the last measured height
 in the final hover. Session 2026-10-20 with the ChArUco lens: 8.0 m low hover, 22.7-24.0 m car park, 31-36 m street,
 25.7 m final hover. `altitude.telemetry` (the flight controller's height) replaces the plan: the setup for live use.
+
+**Aircraft telemetry.** With the aircraft's own flight log (a DJI record decoded to CSV, about 10 records a second)
+the height above the take-off point comes from its barometer (`altitude.telemetry`), the drone position from its GNSS
+(`position_source`) and the heading from its compass-aided attitude (`heading.source: dji`, section 5). The log's clock
+is aligned to the unit's by cross-correlating the horizontal speed (10-23: +1.25 s, correlation 0.92). On 10-23 the
+unit's own GNSS drifted 18 m east (and its height by -15 m) while the aircraft climbed in place; the aircraft's GNSS held
+within 1 m.
 
 ## 4. Roll and pitch: gyro + Xsens
 
@@ -132,6 +141,20 @@ residual is -0.1 +- 1.0 deg (MAD). Independent checks of the corrected heading: 
 row on the satellite image (with the Xsens yaw they scatter over the building roofs), and a north-south line projected
 into street frames runs along the road edges (with the Xsens yaw it crosses them). Static-car trilateration cannot
 check the heading on this flight: from a nearly straight path the mirrored point fits the distances equally well.
+
+**Heading from the aircraft (`heading.source: dji`).** The camera unit is fixed to the airframe, so its ENU yaw is
+`c0 - (DJI yaw)` with one constant c0 (the mount), taken from the visual-GNSS anchors of the moving stretches. 10-23:
+c0 = -176.9 deg from 19 anchors, residual 1.7 deg (MAD); the gyro yaw drifts -1.2 deg per minute against it.
+
+**Camera tilt: measured, not set.** The tilt of the optical axis comes from the IMU in the camera unit every frame, so
+no angle has to be configured. The 10-23 flight was set up with a nominal 30 deg; the IMU reads 23-24 deg below the
+horizon in the holds and 24.3 deg on the ground before take-off (the airframe 2 deg nose down). Three independent checks
+side with the measured angle: the street's near edge in frame 2522 is 86.4 m away with it and 82-85 m away on the
+satellite imagery along the same ray (a fixed 30 deg: 54 m); RVs across the street at 130 m land on the RV lot; and the
+parked cars' ground distances stay most consistent across the five heights (2.0 % median change, against 2.8 % for a
+fixed 30 deg and 4.1 % for 21 deg). `attitude.fixed_depression_deg` forces a fixed tilt (with the measured heading and a
+level horizon) for comparisons or for a camera without the IMU; on 10-23 a fixed 30 deg makes every distance about 20 %
+short. Tools: `tools/tilt_test.py`, `tools/road_check.py`, `tools/overlay_check.py`.
 
 ## 6. Detection, ranging, tracking (`detect`, `range`, `track`)
 
@@ -185,7 +208,10 @@ footprint.
 ## 9. Limits
 
 - Height enters 1:1. Live use needs the flight controller's barometric or laser height; the visual height lags during
-  fast climbs (parked cars then appear to move for a few seconds).
+  fast climbs (parked cars then appear to move for a few seconds), and the vertical odometry still reads climbs about
+  9 % short (barometer check, 10-23).
+- The unit's GNSS receiver is unreliable on the drone: its height drifted on both flights and on 10-23 its horizontal
+  position drifted 18 m while the aircraft held still. Use the aircraft's position when its log is available.
 - Heading: anchored only where the drone translates a few metres; between anchors it is the gyro (6-8 deg between
   clusters here). The flight controller's heading or the GNSS course in forward flight would serve live.
 - Past 100 m a 1 deg ray error is about 7 m of position: far objects can show a few km/h of false motion.

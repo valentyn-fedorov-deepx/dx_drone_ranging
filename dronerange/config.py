@@ -10,6 +10,9 @@ def load(path, work_dir=None):
     cfg = yaml.safe_load(open(path, encoding="utf-8"))
     root = Path(cfg.get("data_root", "."))
     cfg["data"] = {k: str(v if Path(v).is_absolute() else root / v) for k, v in cfg["data"].items()}
+    bw = (cfg.get("calib") or {}).get("bias_window")
+    if bw and not Path(bw["csv"]).is_absolute():
+        bw["csv"] = str(root / bw["csv"])
     cfg["work_dir"] = str(work_dir or cfg.get("work_dir") or Path(path).with_suffix("").name + "_work")
     os.makedirs(cfg["work_dir"], exist_ok=True)
     os.makedirs(Path(cfg["work_dir"]) / "out", exist_ok=True)

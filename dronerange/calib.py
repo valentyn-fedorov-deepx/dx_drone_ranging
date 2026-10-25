@@ -145,7 +145,13 @@ def run_fixed(sess, P, cam, out_path, source="", log=print):
     """Lens intrinsics fixed (ChArUco): fit R_bc, the IMU time offset and the gyro scale factor on the same hover
     pairs; a diagnostic fit with the focal length free as well shows which focal length the gyro prefers (rotations
     about the optical axis do not depend on f, pan and tilt do, so f and the gyro scale separate)."""
-    bg = sess.gyro_bias(P["bias_seconds"])
+    if P.get("bias_window"):                                         # the recording starts in flight: standstill before it
+        from .telemetry import standstill_gyro_bias
+        bw = P["bias_window"]
+        bg, se, n = standstill_gyro_bias(bw["csv"], bw["t0"], bw["t1"], bw.get("power_on"))
+        log(f"gyro bias from {n} standstill samples before the recording (deg/s): {np.degrees(bg).round(3)} +- {np.degrees(se).round(3)}")
+    else:
+        bg = sess.gyro_bias(P["bias_seconds"])
     sess.gyro_scale = 1.0
     sess.set_bias(bg)
     log("gyro bias (deg/s):", np.degrees(bg).round(3))
