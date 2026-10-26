@@ -206,8 +206,10 @@ class Demo:
         f = self.f
         x0, pad = PX, 28
         xl, xr = x0 + pad, W - pad
-        spaced(d, (xl, 26), self.hr.drone_name.upper(), f.num[30], TEXT + (255,), 2.5)
-        y = 70
+        y = 14
+        if self.captions:                                            # the drone's name heads the panel only with captions
+            spaced(d, (xl, 26), self.hr.drone_name.upper(), f.num[30], TEXT + (255,), 2.5)
+            y = 70
         if self.cfg.get("subtitle"):
             d.text(S(xl, 66), self.cfg["subtitle"], font=f.txt[13], fill=DIM + (255,))
             y = 96
@@ -229,13 +231,14 @@ class Demo:
         d.line(S(xl, y, xr, y), fill=LINE + (255,), width=SS)
         # satellite map: as tall as the objects list, the view block and the altitude profile leave
         my0 = y + 18
-        mh = 930 - my0 - 24 - 160 - (120 if self.captions else 0)
+        mh = min(430, 930 - my0 - 24 - 160 - (120 if self.captions else 0))   # no taller than the satellite tiles reach
         mw = xr - xl
         mp = self._map(d, i, t, h, shown, (xl, my0, mw, mh))
         # nearest objects
         y = my0 + mh + 24
         spaced(d, (xl, y), "NEAREST OBJECTS", f.txt[11], DIM + (255,), 1.0)
-        rows = sorted([r for r, _ in shown], key=lambda r: r.range)[:5]
+        n_rows = max(5, int(((820 if self.captions else 860) - (y + 22)) // 27))   # as many as the room below the map holds
+        rows = sorted([r for r, _ in shown], key=lambda r: r.range)[:n_rows]
         for k, r in enumerate(rows):
             yy = y + 22 + k * 27
             col = CLASS_COL.get(r.grp, (200, 200, 200))
@@ -263,7 +266,10 @@ class Demo:
             d.text(S(xl, y + 40), what, font=f.txt[12], fill=DIM + (255,))
             self._legend(d, view, xl, y + 62, xr - xl)
         # altitude profile of the flight
-        self._profile(d, t - self.t0, xl, 966, xr - xl, 74)
+        if self.captions:
+            self._profile(d, t - self.t0, xl, 966, xr - xl, 74)
+        else:
+            self._profile(d, t - self.t0, xl, 904, xr - xl, 132)
         return mp
 
     def _legend(self, d, view, x, y, w):

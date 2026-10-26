@@ -120,7 +120,7 @@ render:
 
 demo:                       # presentation video (the demo step): 30 fps, every camera frame held for its 0.2 s
   out: drone2244_1023_demo.mp4
-  captions: false           # no explanatory text: no title / results cards, section titles, view names, colour scales
+  captions: false           # no explanatory text: no title / results cards, section titles, view names, colour scales, drone name
   sections:
     - {kind: video, name: "Climb from 13 to 30 m", start: 1150, end: 2072, step: 2, hold: 2}    # 6x speed
     - {kind: video, name: "Hold at 30 m", start: 2431, end: 2730}
