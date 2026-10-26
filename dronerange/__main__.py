@@ -17,6 +17,7 @@ Commands (each reads the products of the previous ones from work_dir):
                (polar_verify.json, polar_verify.jpg); --fit-colour refits the S0 colour matrix
     gui        viewer: every camera view under the HUD, click for the pixel's values and its ground point
     stabilise  stabilise.npz: a smooth virtual camera for the HUD view (hud.stabilise: true uses it)
+    demo       out/<demo.out>: the presentation video (title, sections of the flight, closing card) from the demo block
     all        frames, calib, altitude, heading, detect, range, track, validate, render (all presets)
 """
 import argparse
@@ -359,6 +360,27 @@ def cmd_polar(cfg, args, log):
     log(f"raw frames available: {len(store)} of {store.n_frames}")
 
 
+def cmd_demo(cfg, args, log):
+    from . import demo as D
+    from .hud import HudRenderer
+    from .stabilise import Stabiliser
+    s, R, T, trk, mosaic = _hud_data(cfg, log)
+    p = C.work(cfg, "stabilise.npz")
+    if not os.path.exists(p):
+        sys.exit(f"{p} missing: run the stabilise step first")
+    stab = Stabiliser.load(s, p, out_size=(D.CAM_W, D.CAM_H))
+    store, M = _raw_store(cfg) if "raw" in cfg["data"] else (None, None)
+    dc = cfg["demo"]
+    hr = HudRenderer(s, R, T, trk, mosaic, cfg.get("hud", {}), cfg.get("drone_name", "DRONE"))
+    demo = D.Demo(hr, stab, store, M, dc, log)
+    out = dc.get("out", "demo.mp4")
+    out = out if os.path.isabs(out) else C.work(cfg, os.path.join("out", out))
+    sections = dc["sections"]
+    if args.only:                                                    # quick look: one section, or still frames
+        sections = [sec for sec in sections if sec.get("name", sec["kind"]).lower().startswith(args.only.lower())]
+    D.render(demo, sections, out, log, cfg.get("polar", {}).get("workers", 4))
+
+
 def cmd_gui(cfg, args, log):
     from . import gui
     s, R, T, trk, mosaic = _hud_data(cfg, log)
@@ -397,6 +419,7 @@ def main(argv=None):
     rd.add_argument("--tour-s", type=float, default=6.0, help="tour: seconds of video per view")
     po = sub.add_parser("polar"); po.add_argument("--fit-colour", action="store_true")
     gu = sub.add_parser("gui"); gu.add_argument("--frame", type=int); gu.add_argument("--view", default="rgb")
+    de = sub.add_parser("demo"); de.add_argument("--only", help="render only the sections whose name starts with this")
     al = sub.add_parser("all"); al.add_argument("--no-render", action="store_true")
     args = ap.parse_args(argv)
     cfg = C.load(args.config, args.work)

@@ -117,3 +117,25 @@ render:
   climbs: {start: 1150, end: 2120, fps: 5, out: drone2244_1023_climbs.mp4}
   full_2x: {start: 0, end: 3017, fps: 10, out: drone2244_1023_full_2x.mp4}
   hold30_views: {start: 2072, end: 2982, fps: 5, view: tour, tour_s: 6, out: drone2244_1023_hold30_views.mp4}   # needs the raw frames
+
+demo:                       # presentation video (the demo step): 30 fps, every camera frame held for its 0.2 s
+  out: drone2244_1023_demo.mp4
+  subtitle: "Flight test, 23 October 2026"
+  sections:
+    - kind: title
+      seconds: 4.5
+      lines:
+        - {text: "DRONE 2244", style: big}
+        - {text: "Distance, position and motion of people and vehicles from one camera", style: light, gap: 30}
+        - {text: "Flight test  ·  23 October 2026  ·  altitude 13 to 30 m", style: text, gap: 16}
+    - {kind: video, name: "Climb from 13 to 30 m", note: "6x speed", panel: "Climb", start: 1150, end: 2072, step: 2, hold: 2, title_s: 5}
+    - {kind: video, name: "Hold at 30 m", note: "people and vehicles detected, ranged and tracked  ·  real time", panel: "Hold at 30 m", start: 2431, end: 2730}
+    - {kind: views, name: "Polarisation views of the same scene", note: "computed from the raw frames as the VyzAI application does", panel: "Polarisation views", start: 2731, end: 2982, view_s: 6, title_s: 5}
+    - kind: outro
+      seconds: 8
+      lines:
+        - {text: "RESULTS", style: accent}
+        - {num: "59", text: "objects tracked: 7 people and 52 vehicles", gap: 34}
+        - {num: "0.7 m", text: "parked cars keep their place across five altitudes, 13 to 30 m", gap: 12}
+        - {num: "24°", text: "camera tilt measured from the IMU in every frame (22 to 26)", gap: 12}
+        - {num: "2 px", text: "image shake left after gyro stabilisation (38 px before)", gap: 12}

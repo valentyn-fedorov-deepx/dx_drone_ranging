@@ -247,9 +247,9 @@ def read_pixels(loc):
 
 
 def frame_products(job):
-    """worker: (location, colour matrix) -> products (for a process pool)"""
-    loc, matrix = job
-    return products(read_pixels(loc), matrix)
+    """worker: (location, colour matrix[, full resolution]) -> products (for a process pool)"""
+    loc, matrix = job[:2]
+    return products(read_pixels(loc), matrix, full=len(job) > 2 and job[2])
 
 
 def load_matrix(path):
@@ -259,9 +259,10 @@ def load_matrix(path):
 class Prefetcher:
     """products for frames requested in a known order, decoded ahead by worker processes (the video export)"""
 
-    def __init__(self, store, matrix, frames, workers=4, ahead=16):
+    def __init__(self, store, matrix, frames, workers=4, ahead=16, full=False):
         from concurrent.futures import ProcessPoolExecutor
         self.store, self.matrix, self.frames, self.ahead = store, matrix, list(frames), ahead
+        self.full = full
         self.pos = {k: n for n, k in enumerate(self.frames)}
         self.ex = ProcessPoolExecutor(workers)
         self.fut, self.next = {}, 0
@@ -271,10 +272,10 @@ class Prefetcher:
         while self.next < min(upto, len(self.frames)):
             j = self.frames[self.next]
             if j not in self.fut:
-                self.fut[j] = self.ex.submit(frame_products, (self.store.job(j), self.matrix))
+                self.fut[j] = self.ex.submit(frame_products, (self.store.job(j), self.matrix, self.full))
             self.next += 1
         if k not in self.fut:
-            self.fut[k] = self.ex.submit(frame_products, (self.store.job(k), self.matrix))
+            self.fut[k] = self.ex.submit(frame_products, (self.store.job(k), self.matrix, self.full))
         return self.fut.pop(k).result()
 
     def close(self):

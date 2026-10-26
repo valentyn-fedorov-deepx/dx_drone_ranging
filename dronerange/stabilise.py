@@ -104,9 +104,13 @@ class Stabiliser:
         np.savez_compressed(path, Rw=self.Rw, Rv=self.Rv, shift=self.shift, zoom=self.zoom, out=np.array([self.ow, self.oh]))
 
     @classmethod
-    def load(cls, sess, path, **kw):
+    def load(cls, sess, path, out_size=None, **kw):
+        """the saved path, for a view of out_size (the residual shift scales with the view)"""
         z = np.load(path)
-        return cls(sess, zoom=float(z["zoom"]), out_size=tuple(int(x) for x in z["out"]), path=dict(Rw=z["Rw"], Rv=z["Rv"], shift=z["shift"]), **kw)
+        saved = tuple(int(x) for x in z["out"])
+        out = tuple(int(x) for x in out_size) if out_size else saved
+        shift = z["shift"] * np.array([out[0] / saved[0], out[1] / saved[1]])
+        return cls(sess, zoom=float(z["zoom"]), out_size=out, path=dict(Rw=z["Rw"], Rv=z["Rv"], shift=shift), **kw)
 
     # ---- per frame
     def _D(self, i):

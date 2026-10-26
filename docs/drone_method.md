@@ -226,6 +226,15 @@ frame fills the view in 99.8 % of the frames (the worst frame leaves 0.2 % of th
 80 % of the frame; labels and clicks are mapped through the same turn, the radar footprint follows the virtual camera,
 and the measurements are those of the real camera. The viewer has a `stabilise` switch.
 
+**Presentation video** (`demo`, `demo.py`): 1920 x 1080 at 30 fps, laid out for showing rather than for work: the
+stabilised camera view at full height (1474 x 1080), labels with the same VyzAI fields drawn as cards next to their
+object with a leader to the object's point (feet of a person, middle of a vehicle), and a side panel (altitude,
+camera tilt as measured, objects detected, satellite map with the tracks, nearest objects, the view and its colour
+scale, the altitude profile of the flight with a playhead). The sections, titles and closing facts come from the
+config's `demo` block. Nothing is added to the recording: every camera frame is held for its 0.2 s (the timelapse shows
+every second frame), only the titles fade and the views of one frame cross-fade; the polarisation views are computed
+at full resolution there.
+
 `python -m dronerange --config <session>.yaml gui` opens the same frames in a window: the views as buttons (keys 1-8),
 play / pause, a frame slider, the label mode and the boxes. In a polarisation view the slider and the arrow keys step
 over the frames with a raw frame; four worker processes decode them ahead (0.3-0.5 s per frame each). A click on the
