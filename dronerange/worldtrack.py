@@ -11,6 +11,9 @@ plane is what stitches the image tracker's fragments together.
 A track is confirmed after 3 hits; its id is a small integer in the order of confirmation. A track that leaves the
 camera footprint is remembered (parked cars keep their id when the camera comes back); an unobserved track coasts
 with its velocity damped, so a stopped object is found again near where it was.
+Every detection is reported as the tracker has it in that frame (`emit_unconfirmed`): a detection whose track is not
+confirmed yet, or that starts no track, comes out as status "tentative" with id -1; nothing is filled in from later
+frames (duplicates removed by the box suppression are not reported).
 """
 import math
 
@@ -39,6 +42,7 @@ DEFAULTS = dict(
     nms_iou=0.6, nms_ios=0.75,
     bt_link_s=1.0, bt_gate=9.0,                                     # the image tracker's id continues a track seen this recently,
     bt_jump={"person": 2.0, "vehicle": 3.0, "bicycle": 2.5},        # if the ground point stays this close (m, plus speed * dt)
+    emit_unconfirmed=True,                                          # report the detections of tracks not confirmed yet (id -1)
 )
 
 
@@ -187,12 +191,31 @@ def measurement_cov(ref_e, ref_n, cam_e, cam_n, grp, P):
     return (sa ** 2 + rs ** 2) * np.outer(u, u) + (sc ** 2 + rs ** 2) * np.outer(w, w)
 
 
+def _track_row(tr, i, t, t0, status):
+    seen = tr.t_seen == t
+    return dict(frame=i, t=t - t0, id=tr.id if tr.confirmed else -1, cls=tr.cls, grp=tr.grp, status=status,
+                E=tr.x[0], N=tr.x[1], vE=tr.x[2], vN=tr.x[3], speed=math.hypot(tr.x[2], tr.x[3]) if tr.moving else 0.0,
+                speed_kf=math.hypot(tr.x[2], tr.x[3]), static=tr.static, moving=tr.moving,
+                moving_s=0.0 if tr.moving_since is None else t - tr.moving_since,
+                sigma_pos=math.sqrt(max(tr.P[0, 0], tr.P[1, 1])), hits=tr.hits, det_row=tr.det["row"] if seen else -1,
+                conf=tr.det["conf"] if seen else np.nan, bt_id=tr.bt_id)
+
+
+def _det_row(d, i, t, t0):
+    """a detection that starts no track (below min_conf_new): reported where it was measured, without an id"""
+    return dict(frame=i, t=t - t0, id=-1, cls=d["cls"], grp=d["grp"], status="tentative", E=d["z"][0], N=d["z"][1],
+                vE=0.0, vN=0.0, speed=0.0, speed_kf=0.0, static=False, moving=False, moving_s=0.0, sigma_pos=np.nan,
+                hits=1, det_row=d["row"], conf=d["conf"], bt_id=d["track"])
+
+
 def run(sess, R, footprints, params=None, log=print):
     """R: ranges with reference points (Er, Nr) and the smoothed drone position; footprints: frame -> ENU polygon.
-    Returns one row per frame and track that is confirmed and not forgotten."""
+    Returns one row per frame and track that is confirmed and not forgotten (status seen / coast / memory) and, with
+    emit_unconfirmed, one per detection without a confirmed track (status tentative, id -1)."""
     P = {**DEFAULTS, **(params or {})}
     for k in ("q", "ref_sigma", "max_jump", "min_conf_new", "max_pos_sigma", "moving_on", "moving_off", "moving_per_m", "bt_jump"):
         P[k] = {**DEFAULTS[k], **(params or {}).get(k, {})}
+    emit = P["emit_unconfirmed"]
     tracks, next_tmp, next_id, rows = [], 0, 1, []
     by = {f: g for f, g in R.groupby("frame")}
     ft = sess.ft
@@ -259,6 +282,8 @@ def run(sess, R, footprints, params=None, log=print):
                 continue
             Rm = measurement_cov(d["z"][0], d["z"][1], d["cam"][0], d["cam"][1], d["grp"], P)
             if d["conf"] < P["min_conf_new"][d["grp"]]:
+                if emit:
+                    rows.append(_det_row(d, i, t, ft[0]))
                 continue
             tracks.append(Track(next_tmp, d["grp"], d["z"], Rm, t, d, P)); next_tmp += 1
             matched_t.add(len(tracks) - 1)
@@ -284,18 +309,16 @@ def run(sess, R, footprints, params=None, log=print):
         tracks = keep
         for tr in tracks:
             if not tr.confirmed:
+                if emit and tr.t_seen == t:
+                    rows.append(_track_row(tr, i, t, ft[0], "tentative"))   # detected, no id yet
                 continue
-            seen = tr.t_seen == t
             unseen = t - tr.t_seen
-            rows.append(dict(frame=i, t=t - ft[0], id=tr.id, cls=tr.cls, grp=tr.grp, status="seen" if seen else ("coast" if unseen <= 1.0 else "memory"),
-                             E=tr.x[0], N=tr.x[1], vE=tr.x[2], vN=tr.x[3], speed=math.hypot(tr.x[2], tr.x[3]) if tr.moving else 0.0,
-                             speed_kf=math.hypot(tr.x[2], tr.x[3]), static=tr.static, moving=tr.moving,
-                             moving_s=0.0 if tr.moving_since is None else t - tr.moving_since,
-                             sigma_pos=math.sqrt(max(tr.P[0, 0], tr.P[1, 1])), hits=tr.hits, det_row=tr.det["row"] if seen else -1,
-                             conf=tr.det["conf"] if seen else np.nan, bt_id=tr.bt_id))
+            rows.append(_track_row(tr, i, t, ft[0], "seen" if unseen == 0 else ("coast" if unseen <= 1.0 else "memory")))
     T = pd.DataFrame(rows)
     if len(T):
-        log(f"world tracks: {T.id.nunique()} confirmed ids ({(T.drop_duplicates('id').grp == 'person').sum()} person, "
-            f"{(T.drop_duplicates('id').grp == 'vehicle').sum()} vehicle); image tracker ids for comparison: "
+        T = T.sort_values(["frame", "id"], kind="stable").reset_index(drop=True)
+        C = T[T.id >= 0].drop_duplicates("id")
+        log(f"world tracks: {len(C)} confirmed ids ({(C.grp == 'person').sum()} person, {(C.grp == 'vehicle').sum()} vehicle), "
+            f"{int((T.status == 'tentative').sum())} unconfirmed detections; image tracker ids for comparison: "
             f"{R[R.track >= 0].groupby(R.cls.map(GROUPS)).track.nunique().to_dict()}")
     return T

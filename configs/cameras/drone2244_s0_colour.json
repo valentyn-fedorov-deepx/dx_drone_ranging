@@ -1,0 +1,26 @@
+{
+ "matrix": [
+  [
+   2.303386,
+   -0.428652,
+   -0.070167
+  ],
+  [
+   -0.187905,
+   1.365706,
+   -0.424104
+  ],
+  [
+   -0.300533,
+   -0.099852,
+   3.28527
+  ],
+  [
+   -0.105007,
+   -0.048562,
+   -0.161565
+  ]
+ ],
+ "fitted_on": "frame_2026_10_23_18_24_19",
+ "what": "demosaiced polariser-cell sums / 16380 (rows R, G, B, offset) -> linear sRGB of the application's S0 view"
+}

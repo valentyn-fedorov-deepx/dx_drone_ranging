@@ -4,8 +4,10 @@ Distance, position and motion of people and vehicles seen from a VyzAI drone cam
 geometry only (no learned depth). The camera ray through an object's ground point meets the ground at the drone's
 height above ground; the lens comes from a ChArUco calibration, the attitude from the IMU in the camera unit, the
 height and heading from the aircraft's own log when it is available. A ground-plane tracker gives every object a
-persistent id, a velocity and a direction; the video shows VyzAI-style labels, a drone-centred radar (dashcam Mode 2
-style) and a satellite map with the objects by id.
+persistent id, a velocity and a direction; the video shows VyzAI-style labels on every detection, a drone-centred radar
+(dashcam Mode 2 style) and a satellite map with the objects by id. The camera view can also be one of the polarisation
+views of the raw frames (S0, Nz, Nxy, Nxyz and the physical models, as the VyzAI application computes them), in the
+videos and in a viewer where a click gives the pixel's values and its ground point.
 
 ## Drone: quick start
 
@@ -30,10 +32,12 @@ can be run on its own (`python -m dronerange --config ... <step>`); every produc
 | `track` | `tracks.csv` (per frame and track: id, class, status, E/N, lat/lon, speed, direction, Xo/Yo/Zo, range), `tracks.geojson` |
 | `validate` | `validate_pilot.csv`, `validate_person_tracks.csv`, `pilot_tracks.jpg`, `validate_trilateration.csv`, `validate_summary.json` |
 | `terrain` | `dem_grid.npz` (USGS 3DEP, needs internet, US only), `flat_ground_error.csv`; then `range --terrain` uses it |
-| `render` | `out/<preset>.mp4` (1920 x 1080: video + labels, radar, satellite map, target table) from the config presets, or `--start --end --fps --out`; labels only, no detection boxes (`hud.boxes: true` draws them) |
+| `render` | `out/<preset>.mp4` (1920 x 1080: video + labels, radar, satellite map, target table) from the config presets, or `--start --end --fps --out`; labels only, no detection boxes (`hud.boxes: true` draws them); `--view nxyz` (or any polarisation view, or `tour`) for the raw frames |
+| `polar` | the polarisation views of the reference raw frame against the application's own decodes of it: `polar_verify.json`, `polar_verify.jpg`; `--fit-colour` refits the S0 colour matrix |
+| `gui` | viewer: every camera view under the HUD (keys 1-8), play / slider, click for the pixel's ground point (distance, lat / lon) and polarisation values (`--frame N --view nxyz`) |
 
 Data for the 2026-10-20 session (Google Drive folder `1L9jpJLliOZvXhjLXtuRY9K6FrLj_RjPn`): the mp4, `raw/FRAMES.tsv`
-(frame times), `gnss/imu_gnss_*.csv` (or `metadata/xsens_*.bin`); the raw tars are not needed. The ChArUco takes of
+(frame times), `gnss/imu_gnss_*.csv` (or `metadata/xsens_*.bin`); the raw tars only for the polarisation views. The ChArUco takes of
 both drones are in folder `1wfaxRGK_KMiOnNoZGe4MNVoYOe2kG1Rx` (use `decoded/*_decoded_1fps.tar`). Set `data_root` in
 the config.
 
@@ -76,6 +80,21 @@ Config `configs/drone2244_20261023.yaml`; data: Drive folder `1Gb6XY5_x_GW-TTKCm
 
 `tools/tilt_test.py`, `tools/road_check.py` and `tools/overlay_check.py` reproduce the tilt checks.
 
+## Labels and polarisation views (10-23)
+
+Labels show what the system has in each frame: every detection is labelled (12814 of 14036; the rest are second boxes
+on the same vehicle), a missed detection is a missing label, and a detection whose track is not confirmed yet shows
+the class without an id or velocity. Radar and map: filled = detected in this frame, hollow = kept by the tracker.
+
+With the raw frames (`raw/` L1 1 fps + L2 5 fps, 35 GB) the camera view can be a polarisation view. The views follow
+the drone application; against its own decodes of frame 2522 (rms, levels of 255): S0 1.2, Nz 1.3, Nxy 13 (median 0),
+Nxyz 5.8, PN PxSpecularV2 1.8, PN PxDiffuse / VyzLut 7.3 (median 1). How they are computed: docs, section 8.
+
+```bash
+python -m dronerange --config configs/drone2244_20261023.yaml gui --frame 2522 --view nxyz
+python -m dronerange --config configs/drone2244_20261023.yaml render hold30_views
+```
+
 Method, formulas, error budget, the 45 deg mount and the limits: [docs/drone_method.md](docs/drone_method.md).
 
 Live use: the lens and the camera-IMU calibration are fixed per unit, the height should come from the flight
@@ -89,9 +108,9 @@ causal counterpart (`position_smoothing_causal`, a one-sided window, telemetry h
 dronerange/   camera.py (lens models, ray-ground / ray-terrain), session.py (frames, IMU/GNSS, fused attitude,
               gyro Slerp, drone position), xsens.py (MTi log reader), lens.py (ChArUco), calib.py, altitude.py,
               heading.py, telemetry.py (aircraft log), detect.py, ranging.py, worldtrack.py (ground-plane tracker),
-              validate.py, terrain.py,
-              mapview.py (satellite tiles), hud.py (video), __main__.py (CLI), config.py
-configs/      one YAML per recording session; cameras/ = lens calibrations (ChArUco)
+              validate.py, terrain.py, polar.py (raw frames, polarisation views), mapview.py (satellite tiles),
+              hud.py (HUD frames, video), gui.py (viewer), __main__.py (CLI), config.py
+configs/      one YAML per recording session; cameras/ = lens calibrations (ChArUco), S0 colour matrix
 tests/        synthetic tests (python -m pytest tests)
 docs/         drone_method.md
 tools/        tilt checks: tilt_test.py, road_check.py, overlay_check.py

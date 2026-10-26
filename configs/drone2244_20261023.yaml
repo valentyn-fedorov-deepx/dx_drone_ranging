@@ -2,7 +2,7 @@
 # Camera on its own mount, 30 deg down (Brandon). The drone flew to a drain in the car park in the first ~100 s, then
 # held its place and climbed: 13.5 / 16 / ~20 / 25 / 30 m (barometer 13.1 / 16.2 / 20.0 / 25.4 / 30.2 m).
 # Data: Google Drive folder 1Gb6XY5_x_GW-TTKCmbIlrM7LzVHH4vDW (the mp4, raw/FRAMES.tsv, gnss/, metadata/, flight_log/,
-# anchors/; the raw tars are not needed).
+# anchors/; the raw tars of raw/ and frame_2026_10_23_18_24_19/ only for the polarisation views).
 name: drone2244_20261023
 drone_name: DRONE 2244
 data_root: G:/data/vyzai_drone_2244_20261023
@@ -11,6 +11,8 @@ data:
   frames_tsv: raw/FRAMES.tsv
   imu: gnss/imu_gnss_2026_10_23_18_15_55.csv
   flight_log: flight_log/flight_log_10hz.csv            # DJI flight record decoded: barometric height, heading
+  raw: raw                                              # layer archives of the raw frames (polarisation views): L1 1 fps, + L2 5 fps
+  reference_frame: frame_2026_10_23_18_24_19            # one raw frame with the application's own decodes of it
 work_dir: G:/dx_ranging_runs/drone2244_20261023
 enu_origin: [28.55378562980086, -81.56734455699014]   # DJI take-off point (the camera's first fix is already 8.9 m up)
 position_smoothing_s: 5.0
@@ -81,8 +83,12 @@ map:
   margin_m: 150
   tiles_url: https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}
 
+polar:
+  s0_colour: configs/cameras/drone2244_s0_colour.json   # colour matrix of the S0 view (polar --fit-colour)
+  workers: 4                                            # raw-frame decoders (about 0.3 s per frame each)
+
 hud:
-  labels: auto
+  labels: full              # every detection with Xo / Yo / Zo / Range / Velocity (auto: compact for parked vehicles)
   boxes: false              # draw the detection boxes too
   map_min_m_per_px: 0.26
   trail_s: 60
@@ -102,3 +108,4 @@ render:
   hold30: {start: 2072, end: 2982, fps: 5, out: drone2244_1023_hold30.mp4}
   climbs: {start: 1150, end: 2120, fps: 5, out: drone2244_1023_climbs.mp4}
   full_2x: {start: 0, end: 3017, fps: 10, out: drone2244_1023_full_2x.mp4}
+  hold30_views: {start: 2072, end: 2982, fps: 5, view: tour, tour_s: 6, out: drone2244_1023_hold30_views.mp4}   # needs the raw frames

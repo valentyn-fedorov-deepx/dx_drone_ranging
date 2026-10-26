@@ -182,19 +182,71 @@ of the image tracker's long tracks, 81 % of the frames stay on one ground track 
 parked-vehicle rows show as moving (they wander with the height and attitude errors). Two cars parked side by side
 can still swap ids. Real traffic shows 20-45 km/h at 100-125 m. Output `tracks.csv` (one row per frame and track:
 status seen / coast / memory, E, N, lat, lon, velocity, direction, Xo / Yo / Zo, range, ground distance, the matched
-box) and `tracks.geojson`.
+box) and `tracks.geojson`. Every detection is reported as the tracker has it in that frame: a detection whose track is
+not confirmed yet (its first two hits) or that starts no track (below the confidence for a new track) is a row with
+status `tentative` and id -1. Nothing is filled in from later frames, so the video shows what a live run would have
+had. 10-23: 14036 detections; 12814 reported (12619 on confirmed tracks, 195 tentative); the other 1222 are the second
+box on an object (car + truck on one vehicle), merged before association.
 
-## 7. Video (`render`)
+## 7. Video (`render`) and viewer (`gui`)
 
-1920 x 1080: the camera view with boxes and labels, a drone-centred radar, a north-up satellite map (Esri World
-Imagery tiles, cached in `work_dir/tiles`) and the nearest tracks in a table. Label (VyzAI style): "CLASS id", Xo,
-Yo, Zo, Range, Velocity in km/h with an arrow for the direction of motion (up = away from the drone along the camera
-heading, as on the radar). `hud.labels: auto` gives people and moving objects the full label and parked vehicles class,
-id and range; `full` gives every track the full label. The map shows every remembered track by id: filled while in
-view, hollow when out of view, with a velocity arrow while moving; the drone with its 60 s trail and the camera
-footprint.
+1920 x 1080: the camera view with labels, a drone-centred radar, a north-up satellite map (Esri World Imagery tiles,
+cached in `work_dir/tiles`) and a table of the objects detected in the frame. Label (VyzAI style): "CLASS id", Xo, Yo,
+Zo, Range, Velocity in km/h with an arrow for the direction of motion (up = away from the drone along the camera
+heading, as on the radar). The labels show the system's state in that frame and nothing else: every detection of the
+frame gets one, a frame where the detector missed an object has no label on it, and a detection the tracker has not
+confirmed yet shows the class without an id and without a velocity. `hud.labels: full` (10-23) gives every detection
+the full label; `auto` gives parked vehicles class, id and range only; `compact`, `off`. Detection boxes are off
+(`hud.boxes: true` draws them); a label sits next to its object (above, below, beside) and moves away with a thin
+leader only where it would cover another label or object. Radar and map show the tracker's state: filled = detected in
+this frame, hollow = kept by the tracker but not detected in this frame (briefly missed, or out of view), with a
+velocity arrow while moving; the map also has the drone with its 60 s trail and the camera footprint.
 
-## 8. Checks without a survey (`validate`, `terrain`)
+The camera view can be the video or any polarisation view of the raw frames (section 8): `render --view nxyz`, or
+`--view tour` (every view in turn, `tour_s` seconds each; preset `hold30_views`). Only frames with a raw frame are
+rendered in those views.
+
+`python -m dronerange --config <session>.yaml gui` opens the same frames in a window: the views as buttons (keys 1-8),
+play / pause, a frame slider, the label mode and the boxes. In a polarisation view the slider and the arrow keys step
+over the frames with a raw frame; four worker processes decode them ahead (0.3-0.5 s per frame each). A click on the
+picture gives that pixel's ground point (distance from the drone, slant range, bearing, lat / lon: the ray to the
+ground at the frame's height), the values behind the polarisation views (S0, Nz, Nxy, the Nxyz components and the
+three physical models' vectors) and the detection under the click. Ctrl+S saves the frame as PNG.
+
+## 8. Polarisation views of the raw frames (`polar`)
+
+The unit's sensor (Sony IMX253MYR, 4096 x 3000, 12 bit) has a 4 x 4 cell of colour x polariser angle (0 / 45 / 90 /
+135 deg in each 2 x 2 cell, the 2 x 2 cells R / G / G / B), stored upside down; the raw frames come as MIPI RAW12 or,
+in the archives, as one JPEG-LS picture per frame with the pixels regrouped into 16 tiles (`polar.RawStore` reads them
+in place, archives still downloading up to their last complete frame). The views follow the drone application, as
+found by fitting its own decodes of frame 2522 (`frame_2026_10_23_18_24_19/`):
+
+- no black level subtracted; each polariser angle is a 2048 x 1500 Bayer picture (one value per 2 x 2 cell),
+  demosaiced edge-aware; the intensity is the mean of R, G, B;
+- S0 = (I0 + I45 + I90 + I135) / 2, S1 = I0 - I90, S2 = I45 - I135; degree rho = |(S1, S2)| / S0; angle
+  phi = atan2(S2, S1) / 2;
+- **Nz**: grey rho / 0.7; **Nxy**: the jet colour map over phi from -90 to 90 deg; **Nxyz**: (|sin t cos(phi + 45)|,
+  |sin t sin(phi + 45)|, cos t), t = atan(19 rho);
+- physical models: the zenith from rho by the Fresnel equations with n = 1.5, diffuse (**PN PxDiffuse**,
+  **PN VyzLut**, saturating at 90 deg from rho 0.38) or specular below the Brewster angle (**PN PxSpecularV2**); the
+  azimuth phi with y <= 0 (PxDiffuse, PxSpecularV2) or phi + 90 deg with x <= 0 (VyzLut); colour (v + 1) / 2;
+- **S0** in colour: the cell sums demosaiced, a colour matrix fitted to the application's S0 picture of the unit
+  (`configs/cameras/drone2244_s0_colour.json`, `polar --fit-colour`), the sRGB curve.
+
+| view (frame 2522, full resolution) | rms against the application, levels of 255 |
+|---|---|
+| S0 | 1.2 |
+| Nz | 1.3 |
+| Nxy | 13 (median 0: one step of the jet map is 4 levels, the differences sit on noisy pixels) |
+| Nxyz | 5.8 (median 2) |
+| PN PxSpecularV2 | 1.8 |
+| PN PxDiffuse, PN VyzLut | 7.3 (median 1: the diffuse zenith is steep at small rho) |
+
+`polar` reproduces the table (`polar_verify.json`, `polar_verify.jpg`: ours above, the application's below). The
+viewer and the videos use the Stokes values averaged over 2 x 2 cells (1024 x 750), which suppresses the per-cell noise;
+the application's own live views are 512 x 375.
+
+## 9. Checks without a survey (`validate`, `terrain`)
 
 - **Pilot triangle.** The pilot stands at the take-off point (first GNSS fix); while he stands there, the ground
   distance to him must equal the GNSS distance drone -> take-off point. 5 windows in the low hover:
@@ -206,7 +258,7 @@ footprint.
 - **Terrain.** USGS 3DEP on a 10 m grid: the site is flat (objects within -0.39..+0.35 m of the take-off ground),
   flat-ground error -3.0..+1.4 %. `range --terrain` intersects the rays with the terrain model.
 
-## 9. Limits
+## 10. Limits
 
 - Height enters 1:1. Live use needs the flight controller's barometric or laser height; the visual height lags during
   fast climbs (parked cars then appear to move for a few seconds), and the vertical odometry still reads climbs about
@@ -218,6 +270,9 @@ footprint.
 - Past 100 m a 1 deg ray error is about 7 m of position: far objects can show a few km/h of false motion.
 - Flat ground is assumed unless the terrain model is used. Occluded contact points (feet behind a car) bias the
   distance long. The stock detector misses some people and dark cars from above.
+- What the video and the viewer show is causal for detection and tracking (no label or id from later frames), but the
+  geometry still uses centred smoothing windows offline (drone position 1 s, the slow part of roll and pitch 10 s, the
+  heading anchors); a live run would use the one-sided versions with a little lag.
 - The satellite imagery is older than the scene in places: west of the street the video shows a parking lot where the
   imagery still has trees, so cars parked there sit "in the trees" on the map (the camera frame warped onto the
   imagery puts the street exactly on the street).

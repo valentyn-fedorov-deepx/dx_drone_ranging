@@ -12,7 +12,10 @@ Commands (each reads the products of the previous ones from work_dir):
     track      tracks.csv, tracks.geojson: ground-plane tracker with persistent ids, velocity, direction
     validate   pilot triangle + static-vehicle trilateration (validate_*.csv, validate_summary.json, pilot_tracks.jpg)
     terrain    dem_grid.npz from USGS 3DEP + flat_ground_error.csv (needs internet, US sites only)
-    render     out/<preset>.mp4 (presets in the config) or --start/--end/--fps/--out
+    render     out/<preset>.mp4 (presets in the config) or --start/--end/--fps/--out; --view <polarisation view | tour>
+    polar      polarisation views of the raw frames against the application's decodes of the reference frame
+               (polar_verify.json, polar_verify.jpg); --fit-colour refits the S0 colour matrix
+    gui        viewer: every camera view under the HUD, click for the pixel's values and its ground point
     all        frames, calib, altitude, heading, detect, range, track, validate, render (all presets)
 """
 import argparse
@@ -201,7 +204,7 @@ def cmd_track(cfg, args, log):
                       "geometry": {"type": "LineString", "coordinates": coords} if len(coords) > 1 else {"type": "Point", "coordinates": coords[0]}})
     json.dump({"type": "FeatureCollection", "features": feats}, open(C.work(cfg, "tracks.geojson"), "w"))
     st = T[T.status == "seen"].groupby("id").agg(grp=("grp", "first"), n=("frame", "size"), vmax=("speed_kmh", "max"))
-    log(f"tracks.csv: {len(T)} rows, {T.id.nunique()} ids; seen in >= 10 frames: {int((st.n >= 10).sum())}; "
+    log(f"tracks.csv: {len(T)} rows, {T[T.id >= 0].id.nunique()} ids; seen in >= 10 frames: {int((st.n >= 10).sum())}; "
         f"moving (max > 5 km/h, >= 10 frames): {int(((st.vmax > 5) & (st.n >= 10)).sum())}")
 
 
@@ -226,25 +229,99 @@ def cmd_terrain(cfg, args, log):
     log("implied flat-ground distance error: median %+.1f %%, p5 %+.1f, p95 %+.1f" % (F.flat_err_pct.median(), F.flat_err_pct.quantile(.05), F.flat_err_pct.quantile(.95)))
 
 
-def cmd_render(cfg, args, log):
-    from . import hud
+def _hud_data(cfg, log):
     from .mapview import mosaic_for_session
     s = _session(cfg, heading=True)
     R = pd.read_csv(C.work(cfg, "ranges.csv"))
     trk = _track(cfg)
     T = pd.read_csv(C.work(cfg, "tracks.csv"))
     mosaic = mosaic_for_session(s, (T.E.values, T.N.values), cfg.get("map", {}), C.work(cfg, "tiles"), log)
+    return s, R, T, trk, mosaic
+
+
+def _raw_store(cfg):
+    from . import polar
+    d = cfg["data"]
+    dirs = [d[k] for k in ("raw", "reference_frame") if k in d]
+    return polar.RawStore(dirs, d["frames_tsv"]), polar.load_matrix(cfg.get("polar", {}).get("s0_colour"))
+
+
+def _polar_job(cfg, j, view, log):
+    """frames, picture and view name for a video in a polarisation view (or a tour of all views); frames without a raw
+    frame are left out"""
+    import cv2
+    from . import polar
+    store, M = _raw_store(cfg)
+    frames = [i for i in range(j["start"], j["end"] + 1) if i in store]
+    if view == "tour":
+        order = ["rgb"] + list(polar.VIEWS)
+        n = max(1, int(round(j.get("tour_s", 6.0) * j["fps"])))
+        vmap = {i: order[(k // n) % len(order)] for k, i in enumerate(frames)}
+    else:
+        vmap = {i: view for i in frames}
+    log(f"{view}: {len(frames)} frames with a raw frame of {j['end'] - j['start'] + 1}")
+    pf = polar.Prefetcher(store, M, [i for i in frames if vmap[i] != "rgb"], cfg.get("polar", {}).get("workers", 4))
+
+    def picture(i):
+        return None if vmap[i] == "rgb" else cv2.cvtColor(polar.view(vmap[i], pf.get(i)), cv2.COLOR_RGB2BGR)
+    return dict(frames=frames, picture=picture, view_name=lambda i: "RGB" if vmap[i] == "rgb" else polar.VIEWS[vmap[i]]), pf
+
+
+def cmd_render(cfg, args, log):
+    from . import hud
+    s, R, T, trk, mosaic = _hud_data(cfg, log)
     presets = cfg.get("render", {})
     jobs = []
     if args.start is not None:
         jobs.append(dict(start=args.start, end=args.end if args.end is not None else s.n_frames - 1, fps=args.fps or 5.0,
-                         out=args.out or f"render_{args.start}_{args.end}.mp4"))
+                         out=args.out or f"render_{args.start}_{args.end}{'_' + args.view if args.view else ''}.mp4",
+                         view=args.view, tour_s=args.tour_s))
     else:
         names = [args.preset] if args.preset else list(presets)
         jobs += [presets[n] for n in names]
     for j in jobs:
         out = j["out"] if os.path.isabs(j["out"]) else C.work(cfg, os.path.join("out", j["out"]))
-        hud.render(s, R, T, trk, mosaic, out, j["start"], j["end"], j["fps"], cfg.get("hud", {}), cfg.get("drone_name", "DRONE"), log)
+        view = j.get("view") or "rgb"
+        kw, pf = ({}, None) if view == "rgb" else _polar_job(cfg, j, view, log)
+        try:
+            hud.render(s, R, T, trk, mosaic, out, j["start"], j["end"], j["fps"], cfg.get("hud", {}), cfg.get("drone_name", "DRONE"), log, **kw)
+        finally:
+            if pf is not None:
+                pf.close()
+
+
+def cmd_polar(cfg, args, log):
+    import cv2
+    from . import polar
+    ref = cfg["data"].get("reference_frame")
+    if not ref:
+        sys.exit("data.reference_frame missing: a folder with one raw frame and the application's decodes of it")
+    path = cfg.get("polar", {}).get("s0_colour")
+    if args.fit_colour:
+        M = polar.fit_s0_colour(ref)
+        json.dump({"matrix": np.round(M, 6).tolist(), "fitted_on": os.path.basename(os.path.normpath(ref)),
+                   "what": "demosaiced polariser-cell sums / 16380 (rows R, G, B, offset) -> linear sRGB of the application's S0 view"},
+                  open(path, "w"), indent=1)
+        log(f"S0 colour matrix -> {path}")
+    res, sheet = polar.verify(ref, polar.load_matrix(path))
+    json.dump(res, open(C.work(cfg, "polar_verify.json"), "w"), indent=1)
+    cv2.imwrite(C.work(cfg, "polar_verify.jpg"), sheet, [cv2.IMWRITE_JPEG_QUALITY, 90])
+    log("our views of the reference frame against the application's (levels of 255):")
+    for k, v in res.items():
+        log(f"  {k:16s} rms {v['rms']:5.2f} (unclipped pixels {v['rms_unclipped']:5.2f}), median |difference| {v['median_abs']:.0f}")
+    store, _ = _raw_store(cfg)
+    log(f"raw frames available: {len(store)} of {store.n_frames}")
+
+
+def cmd_gui(cfg, args, log):
+    from . import gui
+    s, R, T, trk, mosaic = _hud_data(cfg, log)
+    store, M = _raw_store(cfg) if "raw" in cfg["data"] else (None, None)
+    if store is None:
+        from .polar import RawStore
+        store = RawStore([], cfg["data"]["frames_tsv"])
+    log(f"viewer: {len(store)} raw frames of {s.n_frames}")
+    sys.exit(gui.run(s, R, T, trk, mosaic, store, M, cfg, args.frame, args.view, cfg.get("polar", {}).get("workers", 3)))
 
 
 def cmd_all(cfg, args, log):
@@ -270,6 +347,10 @@ def main(argv=None):
     rd = sub.add_parser("render")
     rd.add_argument("preset", nargs="?"); rd.add_argument("--start", type=int); rd.add_argument("--end", type=int)
     rd.add_argument("--fps", type=float); rd.add_argument("--out")
+    rd.add_argument("--view", help="camera view: rgb (the video), s0, nz, nxy, nxyz, pn_vyzlut, pn_pxdiffuse, pn_pxspecularv2 or tour")
+    rd.add_argument("--tour-s", type=float, default=6.0, help="tour: seconds of video per view")
+    po = sub.add_parser("polar"); po.add_argument("--fit-colour", action="store_true")
+    gu = sub.add_parser("gui"); gu.add_argument("--frame", type=int); gu.add_argument("--view", default="rgb")
     al = sub.add_parser("all"); al.add_argument("--no-render", action="store_true")
     args = ap.parse_args(argv)
     cfg = C.load(args.config, args.work)

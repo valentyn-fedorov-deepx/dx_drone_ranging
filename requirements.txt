@@ -7,4 +7,6 @@ pyyaml
 pillow
 matplotlib
 ultralytics>=8.3        # YOLO + ByteTrack; installs torch (use a CUDA build of torch for speed)
+imagecodecs             # JPEG-LS: the raw frames in the layer archives
+PySide6                 # viewer (gui)
 pytest

@@ -65,6 +65,22 @@ def test_tracker_ids_velocity_moving():
     assert c.cls.iloc[-1] == "car"                                          # majority class, not the occasional "truck"
 
 
+def test_tracker_reports_every_detection_as_it_is():
+    """the hits before a track is confirmed and a lone low-confidence detection come out without an id (status
+    tentative): every detection is reported once and nothing is filled in from later frames"""
+    R, fp = _scene(n=30)
+    lone = dict(frame=12, cls="person", conf=0.1, track=-1, x1=300, y1=0, x2=310, y2=30, Er=-40.0, Nr=60.0, E_drone=0.0, N_drone=0.0, D=72.0)
+    R = pd.concat([R, pd.DataFrame([lone])], ignore_index=True)
+    T = worldtrack.run(_Sess(30), R, fp, log=lambda *a: None)
+    det = T[T.det_row >= 0]
+    assert det.det_row.nunique() == len(R) and not det.det_row.duplicated().any()
+    p = T[(T.grp == "person") & (T.det_row >= 0) & (T.det_row != len(R) - 1)].sort_values("frame")
+    assert (p.head(2).status == "tentative").all() and (p.head(2).id == -1).all()
+    assert p.iloc[2].status == "seen" and p.iloc[2].id > 0
+    row = T[T.det_row == len(R) - 1]
+    assert len(row) == 1 and row.status.iloc[0] == "tentative" and row.id.iloc[0] == -1
+
+
 def test_tracker_remembers_out_of_view():
     """a parked car leaves the footprint for 40 s and comes back: same id"""
     rng = np.random.default_rng(3)
