@@ -1,14 +1,11 @@
-# dx_ranging
+# dx_drone_ranging
 
-Distance to people and vehicles from a single camera, from geometry (no learned depth). Two parts:
-
-- **`dronerange/`**: a drone camera with IMU + GNSS (VyzAI drones 2244 and 2155). The camera ray through an object's
-  ground point meets the ground at the drone's height above ground. A ground-plane tracker gives every object a
-  persistent id, a velocity and a direction; the video shows VyzAI-style labels, a drone-centred radar (dashcam Mode 2
-  style) and a satellite map with the objects by id.
-- **`camera/`**: a static long-range telephoto camera (110 mm, f = 31200 px, 100-1500 m): the real-time pipeline
-  `lrr`, pose-based stature, GPS and OSINT evaluation, the IMU motion-baseline study and the research budgets.
-  See [camera/README.md](camera/README.md).
+Distance, position and motion of people and vehicles seen from a VyzAI drone camera (drones 2244 and 2155), from
+geometry only (no learned depth). The camera ray through an object's ground point meets the ground at the drone's
+height above ground; the lens comes from a ChArUco calibration, the attitude from the IMU in the camera unit, the
+height and heading from the aircraft's own log when it is available. A ground-plane tracker gives every object a
+persistent id, a velocity and a direction; the video shows VyzAI-style labels, a drone-centred radar (dashcam Mode 2
+style) and a satellite map with the objects by id.
 
 ## Drone: quick start
 
@@ -33,7 +30,7 @@ can be run on its own (`python -m dronerange --config ... <step>`); every produc
 | `track` | `tracks.csv` (per frame and track: id, class, status, E/N, lat/lon, speed, direction, Xo/Yo/Zo, range), `tracks.geojson` |
 | `validate` | `validate_pilot.csv`, `validate_person_tracks.csv`, `pilot_tracks.jpg`, `validate_trilateration.csv`, `validate_summary.json` |
 | `terrain` | `dem_grid.npz` (USGS 3DEP, needs internet, US only), `flat_ground_error.csv`; then `range --terrain` uses it |
-| `render` | `out/<preset>.mp4` (1920 x 1080: video + labels, radar, satellite map, target table) from the config presets, or `--start --end --fps --out` |
+| `render` | `out/<preset>.mp4` (1920 x 1080: video + labels, radar, satellite map, target table) from the config presets, or `--start --end --fps --out`; labels only, no detection boxes (`hud.boxes: true` draws them) |
 
 Data for the 2026-10-20 session (Google Drive folder `1L9jpJLliOZvXhjLXtuRY9K6FrLj_RjPn`): the mp4, `raw/FRAMES.tsv`
 (frame times), `gnss/imu_gnss_*.csv` (or `metadata/xsens_*.bin`); the raw tars are not needed. The ChArUco takes of
@@ -91,10 +88,11 @@ causal counterpart (`position_smoothing_causal`, a one-sided window, telemetry h
 ```
 dronerange/   camera.py (lens models, ray-ground / ray-terrain), session.py (frames, IMU/GNSS, fused attitude,
               gyro Slerp, drone position), xsens.py (MTi log reader), lens.py (ChArUco), calib.py, altitude.py,
-              heading.py, detect.py, ranging.py, worldtrack.py (ground-plane tracker), validate.py, terrain.py,
+              heading.py, telemetry.py (aircraft log), detect.py, ranging.py, worldtrack.py (ground-plane tracker),
+              validate.py, terrain.py,
               mapview.py (satellite tiles), hud.py (video), __main__.py (CLI), config.py
 configs/      one YAML per recording session; cameras/ = lens calibrations (ChArUco)
 tests/        synthetic tests (python -m pytest tests)
 docs/         drone_method.md
-camera/       long-range static camera work (snapshot of G:/longrange_det without data and weights)
+tools/        tilt checks: tilt_test.py, road_check.py, overlay_check.py
 ```
