@@ -75,6 +75,7 @@ map:
 
 hud:
   labels: auto              # full | compact | auto (full for people and moving objects, compact for parked vehicles)
+  boxes: false              # draw the detection boxes too
   map_min_m_per_px: 0.26
   trail_s: 60
   map_attribution: "Imagery: Esri, Maxar, Earthstar Geographics"

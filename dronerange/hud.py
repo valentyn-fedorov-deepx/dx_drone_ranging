@@ -76,6 +76,7 @@ def label_lines(r, mode, still):
 def render(sess, R, T, track, mosaic, out, f0=0, f1=10 ** 9, fps=5.0, hud=None, drone_name="DRONE", log=print):
     hud = hud or {}
     mode = hud.get("labels", "auto")
+    boxes = hud.get("boxes", False)                                  # detection boxes off: the labels mark the objects
     trail_s = hud.get("trail_s", 60.0)
     FB, FS, FT, FL, FH = _font(17, True), _font(14), _font(13), _font(13), _font(14, True)
     FM = _font(12, True)
@@ -109,7 +110,7 @@ def render(sess, R, T, track, mosaic, out, f0=0, f1=10 ** 9, fps=5.0, hud=None, 
         rows = [r._replace(moving=bool(r.moving and r.moving_s >= min_mv.get(r.grp, 0.0))) for r in rows]   # vehicles: debounce the moving flag
         seen = [r for r in rows if r.status == "seen" and r.det_row >= 0]
         active = [r for r in rows if r.status in ("seen", "coast")]
-        # ---- boxes and labels on the camera view
+        # ---- labels (and, with hud.boxes, the detection boxes) on the camera view
         ov = Image.new("RGBA", (VW, VH), (0, 0, 0, 0)); od = ImageDraw.Draw(ov)
         dr = ImageDraw.Draw(canvas)
         used = []
@@ -117,20 +118,26 @@ def render(sess, R, T, track, mosaic, out, f0=0, f1=10 ** 9, fps=5.0, hud=None, 
             o = R.loc[int(r.det_row)]
             col = COLORS.get(r.grp, GREY)
             x1, y1, x2, y2 = o.x1 * sx, o.y1 * sy, o.x2 * sx, o.y2 * sy
-            dr.rectangle((x1, y1, x2, y2), outline=col, width=2)
+            if boxes:
+                dr.rectangle((x1, y1, x2, y2), outline=col, width=2)
             still = not r.moving
             head, lines, with_arrow = label_lines(r, mode, still)
             wid = max([od.textbbox((0, 0), head, font=FH)[2]] + [od.textbbox((0, 0), s, font=FL)[2] for s in lines]) + (22 if with_arrow else 0) + 12
             hgt = 20 + 16 * len(lines) + 4
-            lx = min(max(x1, 2), VW - wid - 2)
+            cx_ = 0.5 * (x1 + x2)
+            lx = min(max(x1 if boxes else cx_ - wid / 2, 2), VW - wid - 2)   # without boxes: centred over the object
             ly = y1 - hgt - 4
             if ly < 34:
-                ly = y2 + 4                                           # no room above: below the box
+                ly = y2 + 4                                           # no room above: below the object
+            ly0 = ly
             for (ux, uy, uw, uh) in sorted(used, key=lambda u: u[1]):
                 if lx < ux + uw and ux < lx + wid and ly < uy + uh and uy < ly + hgt:
                     ly = uy - hgt - 3
             ly = min(max(ly, 34), VH - hgt - 2)
             used.append((lx, ly, wid, hgt))
+            if not boxes and abs(ly - ly0) > 6:                       # the label had to move: a thin leader to its object
+                ty = y1 if ly < y1 else y2
+                od.line((min(max(cx_, lx + 4), lx + wid - 4), ly + hgt if ly < y1 else ly, cx_, ty), fill=col + (200,), width=1)
             od.rectangle((lx, ly, lx + wid, ly + hgt), fill=(28, 34, 28, 185), outline=col + (230,), width=1)
             od.text((lx + 6, ly + 3), head, font=FH, fill=WHITE + (255,))
             for k, s in enumerate(lines):
