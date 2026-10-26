@@ -6,7 +6,8 @@ the altitude profile of the whole flight with the playhead. Labels keep the VyzA
 Range, Velocity with the direction arrow), sit next to their object with a thin leader to it, and show what the
 system has in each frame only. The recording is 5 fps and stays so: every camera frame is held for its 0.2 s (a
 timelapse shows every n-th frame); only the titles fade and the views of one frame cross-fade. The sections and the
-texts come from the config (`demo:`).
+texts come from the config (`demo:`); with `captions: false` the video carries no explanatory text (no section
+titles, no view names or colour scales), only the system's data.
 """
 import datetime
 import math
@@ -91,6 +92,7 @@ class Demo:
         self.hr, self.stab, self.store, self.matrix = hr, stab, store, matrix
         self.sess, self.track = hr.sess, hr.track
         self.cfg = cfg or {}
+        self.captions = self.cfg.get("captions", True)
         self.log = log
         self.f = Fonts()
         self.mapviews = {}
@@ -194,7 +196,7 @@ class Demo:
         d.text(S(x, 22), s, font=f.num[14], fill=TEXT + (255,))
         x += d.textlength(s, font=f.num[14]) / SS + 12
         d.text(S(x, 22), s2, font=f.num[14], fill=DIM + (255,))
-        if view != "rgb":
+        if view != "rgb" and self.captions:
             name = VIEW_TEXT[view][0]
             w = d.textlength(name, font=f.semi[16]) / SS + 30
             d.rounded_rectangle(S(CAM_W - 18 - w, 18, CAM_W - 18, 48), radius=15 * SS, fill=(10, 13, 18, 200), outline=ACCENT + (180,), width=SS)
@@ -204,23 +206,30 @@ class Demo:
         f = self.f
         x0, pad = PX, 28
         xl, xr = x0 + pad, W - pad
-        spaced(d, (xl, 26), "DRONE 2244", f.num[30], TEXT + (255,), 2.5)
-        d.text(S(xl, 66), self.cfg.get("subtitle", "Flight test"), font=f.txt[13], fill=DIM + (255,))
-        if section:
-            spaced(d, (xl, 100), section.upper(), f.semi[12], ACCENT + (255,), 1.2)
+        spaced(d, (xl, 26), self.hr.drone_name.upper(), f.num[30], TEXT + (255,), 2.5)
+        y = 70
+        if self.cfg.get("subtitle"):
+            d.text(S(xl, 66), self.cfg["subtitle"], font=f.txt[13], fill=DIM + (255,))
+            y = 96
+        if section and self.captions:
+            spaced(d, (xl, y + 4), section.upper(), f.semi[12], ACCENT + (255,), 1.2)
+            y += 30
+        y += 12
         # stats (the tilt as measured: the real camera, not the stabilised view)
         el = angles_from_R(self.sess.R_wc(t)[None])[1][0]
         stats = [("ALTITUDE", f"{h:.1f}", "m"), ("CAMERA TILT", f"{-math.degrees(el):.1f}", "deg"), ("DETECTED", f"{len(shown)}", "")]
         cw = (xr - xl) / 3
         for k, (lab, val, unit) in enumerate(stats):
             cx = xl + k * cw
-            spaced(d, (cx, 132), lab, f.txt[11], DIM + (255,), 1.0)
-            d.text(S(cx, 148), val, font=f.num[30], fill=TEXT + (255,))
+            spaced(d, (cx, y), lab, f.txt[11], DIM + (255,), 1.0)
+            d.text(S(cx, y + 16), val, font=f.num[30], fill=TEXT + (255,))
             if unit:
-                d.text(S(cx + d.textlength(val, font=f.num[30]) / SS + 5, 164), unit, font=f.txt[13], fill=DIM + (255,))
-        d.line(S(xl, 204, xr, 204), fill=LINE + (255,), width=SS)
-        # satellite map
-        my0, mh = 222, 340
+                d.text(S(cx + d.textlength(val, font=f.num[30]) / SS + 5, y + 32), unit, font=f.txt[13], fill=DIM + (255,))
+        y += 72
+        d.line(S(xl, y, xr, y), fill=LINE + (255,), width=SS)
+        # satellite map: as tall as the objects list, the view block and the altitude profile leave
+        my0 = y + 18
+        mh = 930 - my0 - 24 - 160 - (120 if self.captions else 0)
         mw = xr - xl
         mp = self._map(d, i, t, h, shown, (xl, my0, mw, mh))
         # nearest objects
@@ -245,13 +254,14 @@ class Demo:
         if not rows:
             d.text(S(xl, y + 22), "none in this frame", font=f.txt[13], fill=DIM + (255,))
         # view
-        y = 790
-        d.line(S(xl, y - 14, xr, y - 14), fill=LINE + (255,), width=SS)
-        spaced(d, (xl, y), "VIEW", f.txt[11], DIM + (255,), 1.0)
-        name, what = VIEW_TEXT[view]
-        d.text(S(xl, y + 16), name, font=f.semi[16], fill=(ACCENT if view != "rgb" else TEXT) + (255,))
-        d.text(S(xl, y + 40), what, font=f.txt[12], fill=DIM + (255,))
-        self._legend(d, view, xl, y + 62, xr - xl)
+        if self.captions:
+            y = 820
+            d.line(S(xl, y - 14, xr, y - 14), fill=LINE + (255,), width=SS)
+            spaced(d, (xl, y), "VIEW", f.txt[11], DIM + (255,), 1.0)
+            name, what = VIEW_TEXT[view]
+            d.text(S(xl, y + 16), name, font=f.semi[16], fill=(ACCENT if view != "rgb" else TEXT) + (255,))
+            d.text(S(xl, y + 40), what, font=f.txt[12], fill=DIM + (255,))
+            self._legend(d, view, xl, y + 62, xr - xl)
         # altitude profile of the flight
         self._profile(d, t - self.t0, xl, 966, xr - xl, 74)
         return mp
@@ -426,7 +436,7 @@ def blend(a, b, w):
 
 def over(img, layer, alpha):
     """RGBA float layer over an RGB image with an extra alpha factor"""
-    if alpha <= 0:
+    if layer is None or alpha <= 0:
         return img
     a = layer[..., 3:4] / 255.0 * alpha
     return (img.astype(np.float32) * (1 - a) + layer[..., :3] * a).astype(np.uint8)
@@ -440,9 +450,9 @@ def render(demo, sections, out, log=print, workers=4):
 
     def emit_transition(first):
         nonlocal prev
-        if prev is not None:
-            for k in range(1, fade + 1):
-                vo.put(blend(prev, first, k / (fade + 1)))
+        start = prev if prev is not None else np.zeros_like(first)  # the first section fades in from black
+        for k in range(1, fade + 1):
+            vo.put(blend(start, first, k / (fade + 1)))
 
     for sec in sections:
         kind = sec["kind"]
@@ -459,7 +469,7 @@ def render(demo, sections, out, log=print, workers=4):
             continue
         frames = list(range(sec["start"], sec["end"] + 1, sec.get("step", 1)))
         hold = sec.get("hold", 6)                                    # output frames per camera frame (6 = real time at 30 fps)
-        title = demo.section_title(sec["name"], sec.get("note"))
+        title = demo.section_title(sec["name"], sec.get("note")) if demo.captions else None
         views = None
         pf = None
         if kind == "views":

@@ -97,10 +97,11 @@ python -m dronerange --config configs/drone2244_20261023.yaml gui --frame 2522 -
 python -m dronerange --config configs/drone2244_20261023.yaml render hold30_views
 ```
 
-The presentation video (`demo`, 2.7 min): a title, the climb from 13 to 30 m at 6x speed, a minute of the 30 m hold
-in real time, the polarisation views of the same scene with cross-fades, the results. The camera view fills the
-height (stabilised), a side panel carries altitude, measured camera tilt, objects detected, a satellite map with the
-tracks, the nearest objects and the altitude profile of the flight.
+The presentation video (`demo`, 2.4 min): the climb from 13 to 30 m at 6x speed, a minute of the 30 m hold in real
+time, the polarisation views of the same scene with cross-fades. The camera view fills the height (stabilised), a
+side panel carries altitude, measured camera tilt, objects detected, a satellite map with the tracks, the nearest
+objects and the altitude profile of the flight. No explanatory text (`demo.captions: false`): with captions on, the
+config's title and results cards, section titles and view names come back.
 
 The recording is 5 fps (`session.json`: `record_fps` 5, 3018 frames written, none dropped; the camera itself runs at
 30 fps): L1 + L2 hold every recorded frame. The videos are stabilised: the camera has no gimbal and its 0.36 Hz sway
