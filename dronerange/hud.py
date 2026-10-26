@@ -222,13 +222,13 @@ class HudRenderer:
         canvas.paste(Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)), (0, 0))
         rows = self.rows(i)
         active = [r for r in rows if r.status in ("seen", "coast")]
-        detected = [r for r in rows if r.status in ("seen", "tentative") and r.det_row >= 0]
+        shown = self.in_view(i, rows)                                 # detections of this frame visible in the view
         if self.labels != "off":
-            self._labels(canvas, i, rows)
+            self._labels(canvas, shown)
         dr = ImageDraw.Draw(canvas)
         sats = int(np.interp(t + sess.toff, sess.ti, sess.nsat))
         dr.rectangle((0, 0, VW, TOP), fill=(0, 0, 0))
-        dr.text((10, 6), f"{self.drone_name}  //  T+{t - sess.ft[0]:6.1f} s  //  ALT {h:4.1f} m AGL  //  GNSS 3D {sats} sats  //  detected {len(detected)}",
+        dr.text((10, 6), f"{self.drone_name}  //  T+{t - sess.ft[0]:6.1f} s  //  ALT {h:4.1f} m AGL  //  GNSS 3D {sats} sats  //  detected {len(shown)}",
                 font=self.f["S"], fill=GREY)
         if view_name:
             s = f"VIEW {view_name}"
@@ -237,22 +237,33 @@ class HudRenderer:
         Gf = footprint(sess.cam, Rwc, h, rmax)
         self._radar(canvas, active, Gf, cam_brg, E0, N0, rmax)
         self._map(canvas, i, t, rows, Gf, cam_brg, E0, N0, rmax)
-        self._table(canvas, [r for r in detected if r.status == "seen"], str(self.track.src.values[i]))
+        self._table(canvas, [r for r, _ in shown if r.status == "seen"], str(self.track.src.values[i]))
         return cv2.cvtColor(np.asarray(canvas), cv2.COLOR_RGB2BGR)
 
-    def _labels(self, canvas, i, rows):
+    def in_view(self, i, rows, min_visible=0.25):
+        """(row, HUD box clipped to the view) for this frame's detections at least min_visible inside the view (the
+        stabilised view shows 80 % of the frame)"""
+        out = []
+        for r in rows:
+            b = self.label_box(i, r)
+            if b is None:
+                continue
+            x1, y1, x2, y2 = self.view_box(i, b)
+            c = (max(x1, 0.0), max(y1, float(TOP)), min(x2, float(VW)), min(y2, float(VH)))
+            area = max(x2 - x1, 1e-6) * max(y2 - y1, 1e-6)
+            if c[2] > c[0] and c[3] > c[1] and (c[2] - c[0]) * (c[3] - c[1]) >= min_visible * area:
+                out.append((r, c))
+        return out
+
+    def _labels(self, canvas, shown):
         f = self.f
         ov = Image.new("RGBA", (VW, VH), (0, 0, 0, 0)); od = ImageDraw.Draw(ov)
         dr = ImageDraw.Draw(canvas)
-        labelled = [(r, b) for r in rows for b in [self.label_box(i, r)] if b is not None]
-        small = len(labelled) > 14                                    # crowded: smaller labels
+        small = len(shown) > 14                                       # crowded: smaller labels
         FH, FL, lh = (f["Hs"], f["Ls"], 13) if small else (f["H"], f["L"], 16)
-        order = sorted(labelled, key=lambda rb: (rb[0].grp != "person", not rb[0].moving, rb[0].range))
+        order = sorted(shown, key=lambda rb: (rb[0].grp != "person", not rb[0].moving, rb[0].range))
         items, info = [], []
-        for r, b in order:
-            box = self.view_box(i, b)
-            if not (0 <= 0.5 * (box[0] + box[2]) < VW and TOP <= 0.5 * (box[1] + box[3]) < VH):
-                continue                                              # outside the (zoomed) view
+        for r, box in order:
             head, lines, with_arrow = label_lines(r, self.labels, not r.moving)
             wid = max([od.textbbox((0, 0), head, font=FH)[2]] + [od.textbbox((0, 0), s, font=FL)[2] for s in lines]) + (22 if with_arrow else 0) + 12
             hgt = lh + 4 + lh * len(lines) + 4

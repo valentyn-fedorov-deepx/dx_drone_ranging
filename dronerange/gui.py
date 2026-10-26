@@ -371,9 +371,9 @@ class Viewer(QtWidgets.QMainWindow):
         else:
             lines += ["POLARISATION: " + ("decoding the raw frame ..." if i in self.store else "no raw frame at this frame")]
         hit = []
-        for r in self.hr.rows(i):
+        for r, _ in self.hr.in_view(i, self.hr.rows(i)):
             b = self.hr.label_box(i, r)
-            if b is not None and b[0] - 8 <= u <= b[2] + 8 and b[1] - 8 <= v <= b[3] + 8:
+            if b[0] - 8 <= u <= b[2] + 8 and b[1] - 8 <= v <= b[3] + 8:
                 hit.append(r)
         for r in hit:
             name = NAMES.get(r.cls, r.cls.upper()) + ("" if r.id < 0 else f" {int(r.id)}")
