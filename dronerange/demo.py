@@ -20,7 +20,7 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
 from . import polar
-from .hud import NAMES, place_labels, nice_rmax
+from .hud import NAMES, label_pointer, place_labels, nice_rmax
 from .mapview import MapView
 from .ranging import footprint
 from .stabilise import angles_from_R
@@ -161,20 +161,18 @@ class Demo:
             items.append((box, lw, top + rh * len(rows) + 8))
             info.append((r, head, rows, (not still) and not unconf))
         prefer = [self.last_offset.get(int(r.id)) if int(r.id) >= 0 else None for r, _, _, _ in info]
-        for (box, lw_, lh), (lx, ly), (r, head, rows, moving) in zip(items, place_labels(items, CAM_W, CAM_H, top=10, prefer=prefer), info):
+        for (box, lw_, lh), (lx, ly), (r, head, rows, moving) in zip(items, place_labels(items, CAM_W, CAM_H, top=10, prefer=prefer, gap=16), info):
             col = CLASS_COL.get(r.grp, (200, 200, 200))
             x1, y1, x2, y2 = box
             if int(r.id) >= 0:
                 self.last_offset[int(r.id)] = (lx - 0.5 * (x1 + x2), ly - 0.5 * (y1 + y2))
-            ax, ay = 0.5 * (x1 + x2), (y2 - 2 if r.grp == "person" else 0.5 * (y1 + y2))     # feet / middle of the vehicle
-            ex = min(max(ax, lx + 8), lx + lw_ - 8)
-            ey = ly + lh if ay > ly + lh else (ly if ay < ly else ly + lh / 2)
-            if ay < ly or ay > ly + lh or ax < lx or ax > lx + lw_:
-                d.line(S(ex, ey, ax, ay), fill=col + (200,), width=int(1.3 * SS))
-            d.ellipse(S(ax - 4, ay - 4, ax + 4, ay + 4), fill=(10, 12, 16, 220))
-            d.ellipse(S(ax - 2.6, ay - 2.6, ax + 2.6, ay + 2.6), fill=col + (255,))
             unconf = int(r.id) < 0
             d.rounded_rectangle(S(lx, ly, lx + lw_, ly + lh), radius=7 * SS, fill=(10, 13, 18, 205), outline=(255, 255, 255, 34), width=SS)
+            tri, lead = label_pointer(box, (lx, ly, lx + lw_, ly + lh), size=12, half=8, margin=14)   # the triangle points at the object
+            if lead is not None:
+                d.line(S(*lead[0], *lead[1]), fill=col + (210,), width=int(1.4 * SS))
+            if tri is not None:
+                d.polygon([S(*v) for v in tri], fill=col + ((170,) if unconf else (245,)))
             d.rounded_rectangle(S(lx, ly, lx + 4, ly + lh), radius=2 * SS, fill=col + ((150,) if unconf else (255,)))
             d.text(S(lx + 13, ly + 6), head, font=f.semi[15], fill=TEXT + (255,))
             for k, (nm, val) in enumerate(rows):

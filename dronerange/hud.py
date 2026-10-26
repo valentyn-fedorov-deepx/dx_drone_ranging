@@ -89,22 +89,52 @@ def _overlap(a, b):
     return max(0.0, min(a[2], b[2]) - max(a[0], b[0])) * max(0.0, min(a[3], b[3]) - max(a[1], b[1]))
 
 
-def place_labels(items, W, H, top=TOP + 4, prefer=None):
+def label_pointer(box, rect, size=11.0, half=7.0, margin=12.0):
+    """the triangle from a label towards its object: the label's edge facing the object carries the base, the tip
+    points at the nearest point of the object's facing side (its top when the label is above it). Returns (the three
+    corners, the leader from the tip to the object when they are further apart than the triangle, or None), or
+    (None, None) when the label sits on its object"""
+    x1, y1, x2, y2 = box
+    lx1, ly1, lx2, ly2 = rect
+    lcx, lcy = 0.5 * (lx1 + lx2), 0.5 * (ly1 + ly2)
+    cl = lambda v, a, b: min(max(v, a), b) if a <= b else 0.5 * (a + b)
+    if ly2 <= y1:                                                    # above the object
+        T = (cl(lcx, x1 + 3, x2 - 3), y1); B = (cl(T[0], lx1 + margin, lx2 - margin), ly2)
+    elif ly1 >= y2:                                                  # below
+        T = (cl(lcx, x1 + 3, x2 - 3), y2); B = (cl(T[0], lx1 + margin, lx2 - margin), ly1)
+    elif lx2 <= x1:                                                  # left of it
+        T = (x1, cl(lcy, y1 + 3, y2 - 3)); B = (lx2, cl(T[1], ly1 + margin, ly2 - margin))
+    elif lx1 >= x2:                                                  # right of it
+        T = (x2, cl(lcy, y1 + 3, y2 - 3)); B = (lx1, cl(T[1], ly1 + margin, ly2 - margin))
+    else:
+        return None, None
+    dx, dy = T[0] - B[0], T[1] - B[1]
+    dist = math.hypot(dx, dy)
+    if dist < 3:
+        return None, None
+    ux, uy = dx / dist, dy / dist
+    th = min(size, dist)
+    tip = (B[0] + ux * th, B[1] + uy * th)
+    tri = [(B[0] - uy * half - ux, B[1] + ux * half - uy), (B[0] + uy * half - ux, B[1] - ux * half - uy), tip]
+    return tri, ((tip, T) if dist > th + 3 else None)
+
+
+def place_labels(items, W, H, top=TOP + 4, prefer=None, gap=6):
     """items: (box, w, h) in drawing order -> the top-left corner of each label: the first spot (above, below, right,
-    left of its object, then stacked further up or down) that covers no placed label and no object; when every spot
-    covers something, the one that covers least. prefer: per item an offset (dx, dy) of the label from its box centre
-    to try first (where it was in the previous frame), or None"""
+    left of its object, then stacked further up or down; gap pixels from it) that covers no placed label and no object;
+    when every spot covers something, the one that covers least. prefer: per item an offset (dx, dy) of the label from
+    its box centre to try first (where it was in the previous frame), or None"""
     boxes = [b for b, _, _ in items]
     placed, out = [], []
     for k, (box, w, h) in enumerate(items):
         x1, y1, x2, y2 = box
         cx, cy = 0.5 * (x1 + x2), 0.5 * (y1 + y2)
-        cands = [(cx - w / 2, y1 - h - 6), (cx - w / 2, y2 + 6), (x2 + 8, cy - h / 2), (x1 - w - 8, cy - h / 2)]
+        cands = [(cx - w / 2, y1 - h - gap), (cx - w / 2, y2 + gap), (x2 + gap + 2, cy - h / 2), (x1 - w - gap - 2, cy - h / 2)]
         if prefer is not None and prefer[k] is not None:
             cands.insert(0, (cx + prefer[k][0], cy + prefer[k][1]))
         for s in range(1, 8):
             for dx in (0.0, -0.6 * w, 0.6 * w):
-                cands += [(cx - w / 2 + dx, y1 - h - 6 - s * 0.55 * h), (cx - w / 2 + dx, y2 + 6 + s * 0.55 * h)]
+                cands += [(cx - w / 2 + dx, y1 - h - gap - s * 0.55 * h), (cx - w / 2 + dx, y2 + gap + s * 0.55 * h)]
         best, best_cost = None, None
         for j, (x, y) in enumerate(cands):
             x = min(max(x, 2.0), W - w - 2.0); y = min(max(y, top), H - h - 2.0)
@@ -269,21 +299,20 @@ class HudRenderer:
             hgt = lh + 4 + lh * len(lines) + 4
             items.append((box, wid, hgt)); info.append((r, head, lines, with_arrow))
         prefer = [self.last_offset.get(int(r.id)) if int(r.id) >= 0 else None for r, _, _, _ in info]
-        for (box, wid, hgt), (lx, ly), (r, head, lines, with_arrow) in zip(items, place_labels(items, VW, VH, prefer=prefer), info):
+        for (box, wid, hgt), (lx, ly), (r, head, lines, with_arrow) in zip(items, place_labels(items, VW, VH, prefer=prefer, gap=12), info):
             col = COLORS.get(r.grp, GREY)
             x1, y1, x2, y2 = box
             if int(r.id) >= 0:                                       # keep the label on the same side next frame
                 self.last_offset[int(r.id)] = (lx - 0.5 * (x1 + x2), ly - 0.5 * (y1 + y2))
             if self.boxes:
                 dr.rectangle(box, outline=col, width=2)
-            gap_x = max(x1 - (lx + wid), lx - x2, 0); gap_y = max(y1 - (ly + hgt), ly - y2, 0)
-            if gap_x > 10 or gap_y > 10:                               # away from its object: a thin leader
-                ex, ey = min(max(0.5 * (x1 + x2), lx + 4), lx + wid - 4), (ly + hgt if ly + hgt < y1 else (ly if ly > y2 else ly + hgt / 2))
-                tx, ty = min(max(ex, x1), x2), min(max(ey, y1), y2)
-                od.line((ex, ey, tx, ty), fill=col + (210,), width=1)
-                od.ellipse((tx - 2, ty - 2, tx + 2, ty + 2), fill=col + (230,))
             unconfirmed = int(r.id) < 0
             od.rectangle((lx, ly, lx + wid, ly + hgt), fill=(28, 34, 28, 185), outline=col + ((150,) if unconfirmed else (230,)), width=1)
+            tri, lead = label_pointer(box, (lx, ly, lx + wid, ly + hgt), size=10, half=6)    # the triangle points at the object
+            if lead is not None:
+                od.line(lead[0] + lead[1], fill=col + (210,), width=1)
+            if tri is not None:
+                od.polygon(tri, fill=col + (235,))
             od.text((lx + 6, ly + 3), head, font=FH, fill=WHITE + (255,))
             for k, s in enumerate(lines):
                 od.text((lx + 6, ly + lh + 5 + lh * k), s, font=FL, fill=WHITE + (255,))
