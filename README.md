@@ -35,6 +35,7 @@ can be run on its own (`python -m dronerange --config ... <step>`); every produc
 | `render` | `out/<preset>.mp4` (1920 x 1080: video + labels, radar, satellite map, target table) from the config presets, or `--start --end --fps --out`; labels only, no detection boxes (`hud.boxes: true` draws them); `--view nxyz` (or any polarisation view, or `tour`) for the raw frames |
 | `polar` | the polarisation views of the reference raw frame against the application's own decodes of it: `polar_verify.json`, `polar_verify.jpg`; `--fit-colour` refits the S0 colour matrix |
 | `gui` | viewer: every camera view under the HUD (keys 1-8), play / slider, click for the pixel's ground point (distance, lat / lon) and polarisation values (`--frame N --view nxyz`) |
+| `stabilise` | `stabilise.npz`: a smooth virtual camera for the HUD view (gyro turn + image residual inside the margin of a 1.25 zoom); `hud.stabilise: true` makes render and gui use it |
 
 Data for the 2026-10-20 session (Google Drive folder `1L9jpJLliOZvXhjLXtuRY9K6FrLj_RjPn`): the mp4, `raw/FRAMES.tsv`
 (frame times), `gnss/imu_gnss_*.csv` (or `metadata/xsens_*.bin`); the raw tars only for the polarisation views. The ChArUco takes of
@@ -95,6 +96,10 @@ python -m dronerange --config configs/drone2244_20261023.yaml gui --frame 2522 -
 python -m dronerange --config configs/drone2244_20261023.yaml render hold30_views
 ```
 
+The recording is 5 fps (`session.json`: `record_fps` 5, 3018 frames written, none dropped; the camera itself runs at
+30 fps): L1 + L2 hold every recorded frame. The videos are stabilised: the camera has no gimbal and its 0.36 Hz sway
+moves the image by 15 / 38 px from frame to frame in the 30 m hold, 0.5 / 1.8 px after stabilisation (docs, section 7).
+
 Method, formulas, error budget, the 45 deg mount and the limits: [docs/drone_method.md](docs/drone_method.md).
 
 Live use: the lens and the camera-IMU calibration are fixed per unit, the height should come from the flight
@@ -109,7 +114,8 @@ dronerange/   camera.py (lens models, ray-ground / ray-terrain), session.py (fra
               gyro Slerp, drone position), xsens.py (MTi log reader), lens.py (ChArUco), calib.py, altitude.py,
               heading.py, telemetry.py (aircraft log), detect.py, ranging.py, worldtrack.py (ground-plane tracker),
               validate.py, terrain.py, polar.py (raw frames, polarisation views), mapview.py (satellite tiles),
-              hud.py (HUD frames, video), gui.py (viewer), __main__.py (CLI), config.py
+              hud.py (HUD frames, video), stabilise.py (stabilised view), gui.py (viewer), __main__.py (CLI),
+              config.py
 configs/      one YAML per recording session; cameras/ = lens calibrations (ChArUco), S0 colour matrix
 tests/        synthetic tests (python -m pytest tests)
 docs/         drone_method.md

@@ -76,11 +76,12 @@ class Canvas(QtWidgets.QWidget):
 
 
 class Viewer(QtWidgets.QMainWindow):
-    def __init__(self, sess, R, T, track, mosaic, store, matrix, cfg, frame=None, view="rgb", workers=3):
+    def __init__(self, sess, R, T, track, mosaic, store, matrix, cfg, frame=None, view="rgb", workers=3, stab=None):
         super().__init__()
         hudcfg = dict(cfg.get("hud", {}))
         hudcfg["labels"] = cfg.get("gui", {}).get("labels", "full")
-        self.hr = HudRenderer(sess, R, T, track, mosaic, hudcfg, cfg.get("drone_name", "DRONE"))
+        self.stab = stab
+        self.hr = HudRenderer(sess, R, T, track, mosaic, hudcfg, cfg.get("drone_name", "DRONE"), stab)
         self.sess, self.R, self.store, self.matrix, self.cfg = sess, R, store, matrix, cfg
         self.pool = ProcessPoolExecutor(workers)
         self.cache, self.futs = collections.OrderedDict(), {}
@@ -114,6 +115,10 @@ class Viewer(QtWidgets.QMainWindow):
         self.lab.currentTextChanged.connect(self.set_labels); tb.addWidget(self.lab)
         self.boxes = QtWidgets.QCheckBox("boxes"); self.boxes.setChecked(self.hr.boxes)
         self.boxes.toggled.connect(self.set_boxes); tb.addWidget(self.boxes)
+        self.stab_box = QtWidgets.QCheckBox("stabilise"); self.stab_box.setChecked(self.stab is not None)
+        self.stab_box.setEnabled(self.stab is not None)
+        self.stab_box.setToolTip("view turned to a smooth virtual camera (python -m dronerange ... stabilise)" if self.stab is None else "key S")
+        self.stab_box.toggled.connect(self.set_stab); tb.addWidget(self.stab_box)
         tb.addSeparator()
         self.rawinfo = QtWidgets.QLabel(); tb.addWidget(self.rawinfo)
 
@@ -141,6 +146,7 @@ class Viewer(QtWidgets.QMainWindow):
         keys = (("Space", self.toggle_play), ("Right", lambda: self.step(1)), ("Left", lambda: self.step(-1)),
                 ("PgDown", lambda: self.step(10)), ("PgUp", lambda: self.step(-10)), ("Home", lambda: self.goto(0)),
                 ("End", lambda: self.goto(self.n - 1)), ("L", self.cycle_labels), ("B", lambda: self.boxes.toggle()),
+                ("S", lambda: self.stab_box.isEnabled() and self.stab_box.toggle()),
                 ("Ctrl+S", self.save_png))
         for k, fn in keys:
             QtGui.QShortcut(QtGui.QKeySequence(k), self).activated.connect(fn)
@@ -245,6 +251,7 @@ class Viewer(QtWidgets.QMainWindow):
         self.update_info()
         self.prefetch(i)
         if self.click is not None:
+            self.canvas.marker = self.hr.camera_to_view(*self.click, i)   # the same camera pixel in the (turned) view
             self.update_readout()
 
     def update_info(self):
@@ -272,6 +279,14 @@ class Viewer(QtWidgets.QMainWindow):
 
     def set_boxes(self, on):
         self.hr.boxes = on
+        self.display(self.i)
+
+    def set_stab(self, on):
+        self.hr.stab = self.stab if on else None
+        self.hr.last_offset.clear()
+        if self.click is not None:                                   # the marker stays on the same camera pixel
+            x, y = self.hr.camera_to_view(*self.click, self.i)
+            self.canvas.marker = (x, y)
         self.display(self.i)
 
     def set_speed(self, s):
@@ -315,7 +330,7 @@ class Viewer(QtWidgets.QMainWindow):
 
     # ---- the clicked point
     def on_click(self, x, y):
-        cam = self.hr.view_to_camera(x, y)
+        cam = self.hr.view_to_camera(x, y, self.i)
         if cam is None:
             return
         self.click = cam
@@ -391,8 +406,8 @@ def application():
     return app
 
 
-def run(sess, R, T, track, mosaic, store, matrix, cfg, frame=None, view="rgb", workers=3):
+def run(sess, R, T, track, mosaic, store, matrix, cfg, frame=None, view="rgb", workers=3, stab=None):
     app = application()
-    w = Viewer(sess, R, T, track, mosaic, store, matrix, cfg, frame, view, workers)
+    w = Viewer(sess, R, T, track, mosaic, store, matrix, cfg, frame, view, workers, stab)
     w.show()
     return app.exec()

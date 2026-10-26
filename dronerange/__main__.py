@@ -16,6 +16,7 @@ Commands (each reads the products of the previous ones from work_dir):
     polar      polarisation views of the raw frames against the application's decodes of the reference frame
                (polar_verify.json, polar_verify.jpg); --fit-colour refits the S0 colour matrix
     gui        viewer: every camera view under the HUD, click for the pixel's values and its ground point
+    stabilise  stabilise.npz: a smooth virtual camera for the HUD view (hud.stabilise: true uses it)
     all        frames, calib, altitude, heading, detect, range, track, validate, render (all presets)
 """
 import argparse
@@ -239,6 +240,49 @@ def _hud_data(cfg, log):
     return s, R, T, trk, mosaic
 
 
+def _stabiliser(cfg, s, log=print):
+    """the stabilised view when hud.stabilise is on and the stabilise step has run"""
+    p = C.work(cfg, "stabilise.npz")
+    if not cfg.get("hud", {}).get("stabilise"):
+        return None
+    if not os.path.exists(p):
+        log(f"hud.stabilise is on but {p} is missing (run the stabilise step): not stabilised")
+        return None
+    from .stabilise import Stabiliser
+    return Stabiliser.load(s, p)
+
+
+def cmd_stabilise(cfg, args, log):
+    import cv2
+    from .stabilise import Stabiliser
+    s = _session(cfg, heading=True)
+    sc = cfg.get("stabilise", {})
+    st = Stabiliser(s, zoom=sc.get("zoom", 1.25), turn_share=sc.get("turn_share", 0.6), roll_deg=sc.get("roll_deg", 0.4), w1=sc.get("w1", 1.0))
+    vid = s.video()
+    small = {}
+
+    def read(i):
+        if i not in small:
+            small.clear()
+            small[i] = cv2.resize(vid.read(i), (1024, 750), interpolation=cv2.INTER_AREA)
+        return small[i]
+    st.residual(read, share=sc.get("residual_share", 0.35), w1=sc.get("w1", 1.0), log=log)
+    st.save(C.work(cfg, "stabilise.npz"))
+    # how much the view moves from frame to frame, raw and stabilised (phase correlation, HUD view pixels)
+    win = cv2.createHanningWindow((640, 469), cv2.CV_32F)
+    prev, d_raw, d_st = None, [], []
+    for i in range(s.n_frames):
+        im = read(i)
+        g = [cv2.resize(cv2.cvtColor(x, cv2.COLOR_BGR2GRAY), (640, 469), interpolation=cv2.INTER_AREA).astype(np.float32)
+             for x in (cv2.resize(im, (1280, 938)), st.warp(im, i))]
+        if prev is not None and s.ft[i] - s.ft[i - 1] <= 0.5:
+            d_raw.append(cv2.phaseCorrelate(prev[0], g[0], win)[0]); d_st.append(cv2.phaseCorrelate(prev[1], g[1], win)[0])
+        prev = g
+    r0, r1 = (np.sqrt(((2 * np.array(d)) ** 2).mean(0)) for d in (d_raw, d_st))
+    log(f"stabilise: zoom {st.zoom}, frame-to-frame motion of the view (rms, x / y px of the 1280 x 938 view): "
+        f"raw {r0[0]:.1f} / {r0[1]:.1f}, stabilised {r1[0]:.1f} / {r1[1]:.1f}")
+
+
 def _raw_store(cfg):
     from . import polar
     d = cfg["data"]
@@ -279,12 +323,14 @@ def cmd_render(cfg, args, log):
     else:
         names = [args.preset] if args.preset else list(presets)
         jobs += [presets[n] for n in names]
+    stab = _stabiliser(cfg, s, log)
     for j in jobs:
         out = j["out"] if os.path.isabs(j["out"]) else C.work(cfg, os.path.join("out", j["out"]))
         view = j.get("view") or "rgb"
         kw, pf = ({}, None) if view == "rgb" else _polar_job(cfg, j, view, log)
         try:
-            hud.render(s, R, T, trk, mosaic, out, j["start"], j["end"], j["fps"], cfg.get("hud", {}), cfg.get("drone_name", "DRONE"), log, **kw)
+            hud.render(s, R, T, trk, mosaic, out, j["start"], j["end"], j["fps"], cfg.get("hud", {}), cfg.get("drone_name", "DRONE"), log,
+                       stab=stab, **kw)
         finally:
             if pf is not None:
                 pf.close()
@@ -321,7 +367,7 @@ def cmd_gui(cfg, args, log):
         from .polar import RawStore
         store = RawStore([], cfg["data"]["frames_tsv"])
     log(f"viewer: {len(store)} raw frames of {s.n_frames}")
-    sys.exit(gui.run(s, R, T, trk, mosaic, store, M, cfg, args.frame, args.view, cfg.get("polar", {}).get("workers", 3)))
+    sys.exit(gui.run(s, R, T, trk, mosaic, store, M, cfg, args.frame, args.view, cfg.get("polar", {}).get("workers", 3), _stabiliser(cfg, s, log)))
 
 
 def cmd_all(cfg, args, log):
@@ -339,7 +385,7 @@ def main(argv=None):
     ap.add_argument("--config", required=True)
     ap.add_argument("--work", help="override work_dir")
     sub = ap.add_subparsers(dest="cmd", required=True)
-    for name in ("frames", "calib", "heading", "cars", "detect", "track", "validate", "terrain"):
+    for name in ("frames", "calib", "heading", "cars", "detect", "track", "validate", "terrain", "stabilise"):
         sub.add_parser(name)
     ln = sub.add_parser("lens"); ln.add_argument("--src"); ln.add_argument("--name"); ln.add_argument("--out")
     a = sub.add_parser("altitude"); a.add_argument("--reuse", action="store_true", help="reuse altitude_pairs / altitude_vo csv files")

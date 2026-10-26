@@ -87,8 +87,16 @@ polar:
   s0_colour: configs/cameras/drone2244_s0_colour.json   # colour matrix of the S0 view (polar --fit-colour)
   workers: 4                                            # raw-frame decoders (about 0.3 s per frame each)
 
+stabilise:                  # smooth virtual camera for the HUD view (the stabilise step -> stabilise.npz)
+  zoom: 1.25                # the view shows 80 % of the frame: the margin absorbs the shake
+  turn_share: 0.6           # of the margin for the turn to the smoothed orientation (gyro attitude)
+  residual_share: 0.35      # for the shift the turn leaves (the drone's sway), from the images
+  roll_deg: 0.4
+  w1: 1.0                   # weight of stillness against smooth motion
+
 hud:
   labels: full              # every detection with Xo / Yo / Zo / Range / Velocity (auto: compact for parked vehicles)
+  stabilise: true           # use stabilise.npz for the camera view
   boxes: false              # draw the detection boxes too
   map_min_m_per_px: 0.26
   trail_s: 60

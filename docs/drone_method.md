@@ -206,6 +206,26 @@ The camera view can be the video or any polarisation view of the raw frames (sec
 `--view tour` (every view in turn, `tour_s` seconds each; preset `hold30_views`). Only frames with a raw frame are
 rendered in those views.
 
+**Stabilised view** (`stabilise`, then `hud.stabilise: true`). The camera hangs on the aircraft without a gimbal and
+the image shakes: frame to frame 15 / 38 px (x / y, shake = rms change of the frame-to-frame motion, pixels of the
+1280 x 938 view) in the 30 m hold, mostly a 0.36 Hz pitch sway of up to 1.6 deg. The gyro attitude explains it
+(correlation with the image motion 0.93 horizontally, 0.99 vertically), so each frame is turned to a smooth virtual
+camera: azimuth, elevation and roll of the optical axis follow the smoothest path (least squared second and first
+differences) inside a corridor around the real ones, the corridor being 60 % of the margin a 1.25 zoom leaves; what
+the turn leaves (the drone's sway of a few tens of centimetres) is measured on the turned frames by phase correlation
+and smoothed inside 35 % of the margin. The path breaks at the two recording pauses. Result (10-23, shake x / y):
+
+| part of the flight | raw | stabilised |
+|---|---|---|
+| 30 m hold, frames 2072-2982 | 15.3 / 37.9 | 0.5 / 1.8 |
+| climbs, 1150-2072 | 16.3 / 41.5 | 0.4 / 13.3 |
+| flight to the drain, 0-520 | 42.9 / 47.7 | 11.1 / 27.2 |
+
+The climbs and the approach keep more because the drone really moves there and the margin limits the turn. The
+frame fills the view in 99.8 % of the frames (the worst frame leaves 0.2 % of the view at the edge). The view shows
+80 % of the frame; labels and clicks are mapped through the same turn, the radar footprint follows the virtual camera,
+and the measurements are those of the real camera. The viewer has a `stabilise` switch.
+
 `python -m dronerange --config <session>.yaml gui` opens the same frames in a window: the views as buttons (keys 1-8),
 play / pause, a frame slider, the label mode and the boxes. In a polarisation view the slider and the arrow keys step
 over the frames with a raw frame; four worker processes decode them ahead (0.3-0.5 s per frame each). A click on the

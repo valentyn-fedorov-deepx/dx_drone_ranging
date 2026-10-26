@@ -13,7 +13,9 @@ this frame, hollow = not detected (kept by the tracker); the table lists the obj
 few seconds says so (hysteresis), so the wander of a parked car's ranged position does not show as speed. The map
 shows every remembered track by id: filled while in view, hollow when out of view.
 
-The camera view is the video frame or any picture of the same view (the polarisation views of the raw frames).
+The camera view is the video frame or any picture of the same view (the polarisation views of the raw frames),
+optionally stabilised (stabilise.py: the view turned to a smooth virtual camera, labels mapped the same way; the radar
+footprint then follows the virtual camera too).
 """
 import math
 import os
@@ -87,16 +89,19 @@ def _overlap(a, b):
     return max(0.0, min(a[2], b[2]) - max(a[0], b[0])) * max(0.0, min(a[3], b[3]) - max(a[1], b[1]))
 
 
-def place_labels(items, W, H, top=TOP + 4):
+def place_labels(items, W, H, top=TOP + 4, prefer=None):
     """items: (box, w, h) in drawing order -> the top-left corner of each label: the first spot (above, below, right,
     left of its object, then stacked further up or down) that covers no placed label and no object; when every spot
-    covers something, the one that covers least"""
+    covers something, the one that covers least. prefer: per item an offset (dx, dy) of the label from its box centre
+    to try first (where it was in the previous frame), or None"""
     boxes = [b for b, _, _ in items]
     placed, out = [], []
     for k, (box, w, h) in enumerate(items):
         x1, y1, x2, y2 = box
         cx, cy = 0.5 * (x1 + x2), 0.5 * (y1 + y2)
         cands = [(cx - w / 2, y1 - h - 6), (cx - w / 2, y2 + 6), (x2 + 8, cy - h / 2), (x1 - w - 8, cy - h / 2)]
+        if prefer is not None and prefer[k] is not None:
+            cands.insert(0, (cx + prefer[k][0], cy + prefer[k][1]))
         for s in range(1, 8):
             for dx in (0.0, -0.6 * w, 0.6 * w):
                 cands += [(cx - w / 2 + dx, y1 - h - 6 - s * 0.55 * h), (cx - w / 2 + dx, y2 + 6 + s * 0.55 * h)]
@@ -119,8 +124,10 @@ def place_labels(items, W, H, top=TOP + 4):
 class HudRenderer:
     """One HUD frame at a time, any frame in any order (the video export and the viewer use it)."""
 
-    def __init__(self, sess, R, T, track, mosaic, hud=None, drone_name="DRONE"):
+    def __init__(self, sess, R, T, track, mosaic, hud=None, drone_name="DRONE", stab=None):
         self.sess, self.R, self.track, self.mosaic = sess, R, track, mosaic
+        self.stab = stab                                             # Stabiliser or None
+        self.last_offset = {}                                        # track id -> label offset from its box centre
         self.hud = hud = hud or {}
         self.labels = hud.get("labels", "auto")
         self.boxes = hud.get("boxes", False)                         # detection boxes off: the labels mark the objects
@@ -143,14 +150,27 @@ class HudRenderer:
         return None
 
     # ---- coordinates of the camera view
-    def view_to_camera(self, x, y):
-        """HUD pixel -> camera pixel, or None outside the camera view"""
+    def view_to_camera(self, x, y, i=None):
+        """HUD pixel -> camera pixel (frame i when stabilised), or None outside the camera view"""
         if not (0 <= x < VW and TOP <= y < VH):
             return None
+        if self.stab is not None:
+            u, v = self.stab.to_camera(i, [[x, y]])[0]
+            return float(u), float(v)
         return x / self.sx, y / self.sy
 
-    def camera_to_view(self, u, v):
+    def camera_to_view(self, u, v, i=None):
+        if self.stab is not None:
+            x, y = self.stab.to_view(i, [[u, v]])[0]
+            return float(x), float(y)
         return u * self.sx, v * self.sy
+
+    def view_box(self, i, b):
+        """camera-pixel box -> HUD box"""
+        if self.stab is None:
+            return b[0] * self.sx, b[1] * self.sy, b[2] * self.sx, b[3] * self.sy
+        q = self.stab.to_view(i, [[b[0], b[1]], [b[2], b[1]], [b[0], b[3]], [b[2], b[3]]])
+        return q[:, 0].min(), q[:, 1].min(), q[:, 0].max(), q[:, 1].max()
 
     def video_frame(self, i):
         if self._vid is None:
@@ -162,9 +182,11 @@ class HudRenderer:
         rows = [] if g is None else list(g.itertuples())
         return [r._replace(moving=bool(r.moving and r.moving_s >= self.min_mv.get(r.grp, 0.0))) for r in rows]   # vehicles: debounce
 
-    def geometry(self, i):
+    def geometry(self, i, display=False):
+        """time, camera rotation (the virtual camera's with display=True when stabilised), height, camera bearing,
+        drone position"""
         t = self.sess.ft[i]
-        Rwc = self.sess.R_wc(t)
+        Rwc = self.stab.Rv[i] if display and self.stab is not None else self.sess.R_wc(t)
         h = float(self.track.h.values[i])
         ax = Rwc @ OPTICAL_AXIS
         E0, N0 = self.sess.drone_EN(t, smooth=True)
@@ -191,8 +213,11 @@ class HudRenderer:
             if picture is None:
                 return None
         sess = self.sess
-        t, Rwc, h, cam_brg, E0, N0 = self.geometry(i)
-        frame = cv2.resize(picture, (VW, VH), interpolation=cv2.INTER_AREA if picture.shape[1] > VW else cv2.INTER_LINEAR)
+        t, Rwc, h, cam_brg, E0, N0 = self.geometry(i, display=True)
+        if self.stab is not None:
+            frame = self.stab.warp(picture, i)
+        else:
+            frame = cv2.resize(picture, (VW, VH), interpolation=cv2.INTER_AREA if picture.shape[1] > VW else cv2.INTER_LINEAR)
         canvas = Image.new("RGB", (CW, CH), BG)
         canvas.paste(Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)), (0, 0))
         rows = self.rows(i)
@@ -225,14 +250,19 @@ class HudRenderer:
         order = sorted(labelled, key=lambda rb: (rb[0].grp != "person", not rb[0].moving, rb[0].range))
         items, info = [], []
         for r, b in order:
-            box = (b[0] * self.sx, b[1] * self.sy, b[2] * self.sx, b[3] * self.sy)
+            box = self.view_box(i, b)
+            if not (0 <= 0.5 * (box[0] + box[2]) < VW and TOP <= 0.5 * (box[1] + box[3]) < VH):
+                continue                                              # outside the (zoomed) view
             head, lines, with_arrow = label_lines(r, self.labels, not r.moving)
             wid = max([od.textbbox((0, 0), head, font=FH)[2]] + [od.textbbox((0, 0), s, font=FL)[2] for s in lines]) + (22 if with_arrow else 0) + 12
             hgt = lh + 4 + lh * len(lines) + 4
             items.append((box, wid, hgt)); info.append((r, head, lines, with_arrow))
-        for (box, wid, hgt), (lx, ly), (r, head, lines, with_arrow) in zip(items, place_labels(items, VW, VH), info):
+        prefer = [self.last_offset.get(int(r.id)) if int(r.id) >= 0 else None for r, _, _, _ in info]
+        for (box, wid, hgt), (lx, ly), (r, head, lines, with_arrow) in zip(items, place_labels(items, VW, VH, prefer=prefer), info):
             col = COLORS.get(r.grp, GREY)
             x1, y1, x2, y2 = box
+            if int(r.id) >= 0:                                       # keep the label on the same side next frame
+                self.last_offset[int(r.id)] = (lx - 0.5 * (x1 + x2), ly - 0.5 * (y1 + y2))
             if self.boxes:
                 dr.rectangle(box, outline=col, width=2)
             gap_x = max(x1 - (lx + wid), lx - x2, 0); gap_y = max(y1 - (ly + hgt), ly - y2, 0)
@@ -363,10 +393,10 @@ class HudRenderer:
 
 
 def render(sess, R, T, track, mosaic, out, f0=0, f1=10 ** 9, fps=5.0, hud=None, drone_name="DRONE", log=print,
-           frames=None, picture=None, view_name=None):
+           frames=None, picture=None, view_name=None, stab=None):
     """video of frames f0..f1 (or the given frame numbers); picture(i) -> the camera view (BGR) instead of the video
-    frame; view_name: a name or i -> name for the header"""
-    hr = HudRenderer(sess, R, T, track, mosaic, hud, drone_name)
+    frame; view_name: a name or i -> name for the header; stab: Stabiliser"""
+    hr = HudRenderer(sess, R, T, track, mosaic, hud, drone_name, stab)
     if frames is None:
         frames = range(f0, min(f1, sess.n_frames - 1) + 1)
     out = str(out)
