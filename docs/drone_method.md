@@ -287,7 +287,38 @@ the application's own live views are 512 x 375.
 - **Terrain.** USGS 3DEP on a 10 m grid: the site is flat (objects within -0.39..+0.35 m of the take-off ground),
   flat-ground error -3.0..+1.4 %. `range --terrain` intersects the rays with the terrain model.
 
-## 10. Limits
+## 10. Live mode (`live_height`, configs `*_live.yaml`)
+
+Everything from the unit itself, causally: tilt (`attitude.causal`: the slow part from the past 10 s), position (the
+unit's GNSS, one-sided filter), height and heading from `live_height.py`.
+
+Height: the change of height comes from a key-frame vertical odometry (the plane model of section 3 between the key
+frame and the current frame; the key frame is renewed after 3 s, at thin overlap or 8 % of height change, so the small
+bias of each pair does not add up every frame); the absolute height from pairs in which the unit's GNSS flew >= 5 m at
+>= 3 m/s within 4 s and the images moved by >= 12 % of the height sideways, successive windows not overlapping. A
+Kalman filter on ln h starts from the median of the first three fixes, takes later fixes within 3 sigma and at most
+30 % away, and restarts on three gated fixes that agree within 15 %. On 10-20 the fixes agree with the pilot-checked
+plan within 2 % at >= 3 m/s, are 15 % high at 1.5-3 m/s and useless below (in hover the receiver drifts metres per
+minute, as much as the travel); hence the speed condition, and no fixed correction factor would work. Result: 10-20
+height known from t 460 s, median error -0.2 %, |error| median 1.0 %; 10-23 never flies faster than 2.3 m/s, so no fix
+and no height (the odometry alone cannot give the scale).
+
+Heading: at each fast pair the direction of the image motion against the GNSS course is the error of the yaw used (the
+magnetic yaw); the live heading is the gyro yaw plus the median correction of the anchors of the last two minutes
+(3-MAD outliers out), held between anchors.
+
+Real-time simulation (`replay`): the estimator, the ranging and the tracker run frame by frame (the classes
+`LiveHeight`, `WorldTracker` and `range_frame` that the batch steps loop over, so both give the same result), the
+recording plays at its own pace and a frame the chain cannot keep up with is dropped. On 10-20 (frame 2200 to the end)
+a frame takes 189 ms median, 236 ms p95, of the 200 ms of a 5 fps frame (detection 60 ms on the GPU side by side with
+the height 142 ms on the CPU, tracking 8 ms, drawing 38 ms); 6.5 % of the frames were dropped and the height locked at
+the same frame as in the batch run.
+
+Open: an accelerometer scale for vertical flights (the vertical double integral of the specific force against the
+odometry over a climb start / stop gives the height; prototype on 10-23: most windows within 10 % of the barometer,
+one climb wrong), a lighter feature detector for the device.
+
+## 11. Limits
 
 - Height enters 1:1. Live use needs the flight controller's barometric or laser height; the visual height lags during
   fast climbs (parked cars then appear to move for a few seconds), and the vertical odometry still reads climbs about

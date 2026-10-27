@@ -63,7 +63,8 @@ altitude:
   cars_check: {start: 1000, end: 3960, step: 40, imgsz: 1536, conf: 0.35, width_m: 1.9}
 
 heading:
-  use: false                # live: the unit's magnetic yaw (map positions only; distances do not need it)
+  use: true
+  source: live              # live: gyro yaw anchored causally by the fast pairs (live_height writes heading.csv); before the first anchors the gyro yaw from the first magnetic yaw
   window_s: 30.0
   min_anchors: 5
   gap_s: 20.0
@@ -102,3 +103,12 @@ terrain:
 render:
   carpark: {start: 1640, end: 2240, fps: 5, out: drone2244_tracks_carpark.mp4}
   full_2x: {start: 75, end: 3970, fps: 10, out: drone2244_tracks_full_2x.mp4}
+
+stabilise: {zoom: 1.25, turn_share: 0.6, residual_share: 0.35, roll_deg: 0.4, w1: 1.0}
+
+demo:                       # presentation video of the live run: from the first fast leg on (no height before it)
+  out: drone2244_1020_live_demo.mp4
+  captions: false
+  sections:
+    - {kind: video, name: "Street flight", start: 2283, end: 3289, step: 1, hold: 3}    # 2x speed
+    - {kind: video, name: "Final hover", start: 3290, end: 3589}

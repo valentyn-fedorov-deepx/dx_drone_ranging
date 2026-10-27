@@ -37,6 +37,8 @@ can be run on its own (`python -m dronerange --config ... <step>`); every produc
 | `gui` | viewer: every camera view under the HUD (keys 1-8), play / slider, click for the pixel's ground point (distance, lat / lon) and polarisation values (`--frame N --view nxyz`) |
 | `stabilise` | `stabilise.npz`: a smooth virtual camera for the HUD view (gyro turn + image residual inside the margin of a 1.25 zoom); `hud.stabilise: true` makes render and gui use it |
 | `demo` | `out/<demo.out>`: the presentation video (1920 x 1080, 30 fps): title, sections of the flight, closing card, from the config's `demo` block (`--only <section>` for one section) |
+| `live_height` | `altitude_live.csv`: the height from the unit's own data only, causally (`altitude.live`); with `use: true` it becomes the altitude track; with `heading.source: live` it also writes the causal heading (`heading.csv`) |
+| `replay` | real-time simulation in a window: the recording at its own pace, every frame through detection (YOLO on the GPU, or `--detect cached`), live height and heading, ranging, tracking and the presentation frame; frames it cannot keep up with are dropped; `replay.csv` (`--start --end --speed`) |
 
 Data for the 2026-10-20 session (Google Drive folder `1L9jpJLliOZvXhjLXtuRY9K6FrLj_RjPn`): the mp4, `raw/FRAMES.tsv`
 (frame times), `gnss/imu_gnss_*.csv` (or `metadata/xsens_*.bin`); the raw tars only for the polarisation views. The ChArUco takes of
@@ -114,6 +116,43 @@ controller (barometric or laser), and ranging plus tracking cost microseconds pe
 repo: the centred smoothing windows (attitude, drone position, heading anchors) and the visual height plan; each has a
 causal counterpart (`position_smoothing_causal`, a one-sided window, telemetry height).
 
+## Live mode: only what the unit has (2026-10-27)
+
+For porting to the device: the configs `*_live.yaml` use only the unit's camera, IMU and GNSS, and every filter looks
+at the past only (tilt, position, height, heading); the aircraft's log is read only to evaluate.
+
+- **Height** (`live_height.py`): key-frame vertical odometry (ground homography, gyro, IMU tilt) carries ln h; the
+  absolute height comes from pairs where the unit's GNSS flew >= 5 m at >= 3 m/s and the images confirm the motion
+  (h = GNSS travel / image travel per metre of height); a Kalman filter on ln h with gates and restarts. No numbers
+  set per flight.
+- **Heading**: the gyro yaw, corrected by the same fast pairs (image motion direction against the GNSS course), the
+  median of the last two minutes, held in between.
+- **Accuracy of the fixes depends on the speed** (10-20): within 2 % at >= 3 m/s, +15 % at 1.5-3 m/s, useless slower
+  (the receiver drifts metres per minute in hover). So there is no constant correction factor.
+
+| flight | result |
+|---|---|
+| 10-20 (street flight up to 8 m/s) | height known from the first fast leg (t 460 s); against the pilot-checked plan: median error -0.2 %, absolute error median 1.0 % (street -1.1 %, final hover -0.1 %) |
+| 10-23 (vertical climbs, max 2.3 m/s) | no fast travel, so no fix and no height: the live mode has no distances on this flight |
+
+Live use needs a short straight leg at >= 3 m/s (5-10 m) after take-off and after large height changes; until then the
+height, and so the distance, is unknown. For flights without such legs: the scale from the accelerometer during climbs
+(prototype on 10-23: windows with a clear climb start / stop mostly within 10 % of the barometer, one climb wrong; not
+in the pipeline yet) or the aircraft's barometer through the device.
+
+```bash
+python -m dronerange --config configs/drone2244_20261020_live.yaml live_height
+```
+
+**Real-time simulation** (`replay`): one frame at a time, the past only; detection on the GPU and the height on the CPU
+run side by side. 10-20 from frame 2200 to the end (this PC, RTX 5070 Ti): per frame detect 60 ms (YOLO11x at 2048 px),
+height 142 ms (SIFT at half resolution), tracking 8 ms, drawing 38 ms: 189 ms median (p95 236) of the 200 ms a 5 fps
+frame allows; 116 of 1771 frames dropped, at most 0.6 s behind; the height locks at frame 2283, as in the batch run.
+
+```bash
+python -m dronerange --config configs/drone2244_20261020_live.yaml replay --start 2200
+```
+
 ## Layout
 
 ```
@@ -122,7 +161,8 @@ dronerange/   camera.py (lens models, ray-ground / ray-terrain), session.py (fra
               heading.py, telemetry.py (aircraft log), detect.py, ranging.py, worldtrack.py (ground-plane tracker),
               validate.py, terrain.py, polar.py (raw frames, polarisation views), mapview.py (satellite tiles),
               hud.py (HUD frames, video), stabilise.py (stabilised view), gui.py (viewer), demo.py (presentation
-              video), __main__.py (CLI), config.py
+              video), live_height.py (unit-only height and heading), replay.py (real-time simulation),
+              __main__.py (CLI), config.py
 configs/      one YAML per recording session; cameras/ = lens calibrations (ChArUco), S0 colour matrix
 tests/        synthetic tests (python -m pytest tests)
 docs/         drone_method.md

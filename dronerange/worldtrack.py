@@ -208,21 +208,21 @@ def _det_row(d, i, t, t0):
                 hits=1, det_row=d["row"], conf=d["conf"], bt_id=d["track"])
 
 
-def run(sess, R, footprints, params=None, log=print):
-    """R: ranges with reference points (Er, Nr) and the smoothed drone position; footprints: frame -> ENU polygon.
-    Returns one row per frame and track that is confirmed and not forgotten (status seen / coast / memory) and, with
-    emit_unconfirmed, one per detection without a confirmed track (status tentative, id -1)."""
-    P = {**DEFAULTS, **(params or {})}
-    for k in ("q", "ref_sigma", "max_jump", "min_conf_new", "max_pos_sigma", "moving_on", "moving_off", "moving_per_m", "bt_jump"):
-        P[k] = {**DEFAULTS[k], **(params or {}).get(k, {})}
-    emit = P["emit_unconfirmed"]
-    tracks, next_tmp, next_id, rows = [], 0, 1, []
-    by = {f: g for f, g in R.groupby("frame")}
-    ft = sess.ft
-    f0 = int(R.frame.min()); f1 = int(R.frame.max())
-    for i in range(f0, f1 + 1):
-        t = ft[i]
-        g = by.get(i)
+class WorldTracker:
+    """the tracker frame by frame (step), for a live run; run() feeds it a whole session"""
+
+    def __init__(self, sess, params=None):
+        P = {**DEFAULTS, **(params or {})}
+        for k in ("q", "ref_sigma", "max_jump", "min_conf_new", "max_pos_sigma", "moving_on", "moving_off", "moving_per_m", "bt_jump"):
+            P[k] = {**DEFAULTS[k], **(params or {}).get(k, {})}
+        self.P, self.emit, self.t0 = P, P["emit_unconfirmed"], float(sess.ft[0])
+        self.tracks, self.next_tmp, self.next_id, self.prev_t = [], 0, 1, None
+
+    def step(self, i, t, g, poly):
+        """frame i at time t: g = its ranged detections (DataFrame with Er, Nr, ...; index = detection row) or None,
+        poly = the camera footprint (ENU) -> the rows of this frame"""
+        P, emit, t0 = self.P, self.emit, self.t0
+        out = []
         dets = []
         if g is not None:
             for o in g.itertuples():
@@ -237,6 +237,7 @@ def run(sess, R, footprints, params=None, log=print):
                 if not any(k["grp"] == d["grp"] and (_iou(k["box"], d["box"]) > P["nms_iou"] or _ios(k["box"], d["box"]) > P["nms_ios"]) for k in kept):
                     kept.append(d)
             dets = kept
+        tracks = self.tracks
         for tr in tracks:
             tr.predict(t)
         matched_t, matched_d = set(), set()
@@ -283,18 +284,18 @@ def run(sess, R, footprints, params=None, log=print):
             Rm = measurement_cov(d["z"][0], d["z"][1], d["cam"][0], d["cam"][1], d["grp"], P)
             if d["conf"] < P["min_conf_new"][d["grp"]]:
                 if emit:
-                    rows.append(_det_row(d, i, t, ft[0]))
+                    out.append(_det_row(d, i, t, t0))
                 continue
-            tracks.append(Track(next_tmp, d["grp"], d["z"], Rm, t, d, P)); next_tmp += 1
+            tracks.append(Track(self.next_tmp, d["grp"], d["z"], Rm, t, d, P)); self.next_tmp += 1
             matched_t.add(len(tracks) - 1)
-        poly = footprints.get(i)
-        dt = ft[i] - ft[i - 1] if i > 0 else 0.2
+        dt = t - self.prev_t if self.prev_t is not None else 0.2
+        self.prev_t = t
         keep = []
         for k, tr in enumerate(tracks):
             if not tr.confirmed:
                 recent = [f for f in tr.frames if f > i - P["confirm_window"]]
                 if len(recent) >= P["confirm_hits"]:
-                    tr.id = next_id; next_id += 1
+                    tr.id = self.next_id; self.next_id += 1
                 elif i - tr.frames[0] >= P["confirm_window"]:
                     continue                                         # never confirmed: drop
             if k not in matched_t:
@@ -306,14 +307,26 @@ def run(sess, R, footprints, params=None, log=print):
                 if tr.misses_in_view > P["max_miss_in_view_s"] or unseen > limit:
                     continue
             keep.append(tr)
-        tracks = keep
-        for tr in tracks:
+        self.tracks = keep
+        for tr in keep:
             if not tr.confirmed:
                 if emit and tr.t_seen == t:
-                    rows.append(_track_row(tr, i, t, ft[0], "tentative"))   # detected, no id yet
+                    out.append(_track_row(tr, i, t, t0, "tentative"))   # detected, no id yet
                 continue
             unseen = t - tr.t_seen
-            rows.append(_track_row(tr, i, t, ft[0], "seen" if unseen == 0 else ("coast" if unseen <= 1.0 else "memory")))
+            out.append(_track_row(tr, i, t, t0, "seen" if unseen == 0 else ("coast" if unseen <= 1.0 else "memory")))
+        return out
+
+
+def run(sess, R, footprints, params=None, log=print):
+    """R: ranges with reference points (Er, Nr) and the smoothed drone position; footprints: frame -> ENU polygon.
+    Returns one row per frame and track that is confirmed and not forgotten (status seen / coast / memory) and, with
+    emit_unconfirmed, one per detection without a confirmed track (status tentative, id -1)."""
+    wt = WorldTracker(sess, params)
+    by = {f: g for f, g in R.groupby("frame")}
+    rows = []
+    for i in range(int(R.frame.min()), int(R.frame.max()) + 1):
+        rows += wt.step(i, float(sess.ft[i]), by.get(i), footprints.get(i))
     T = pd.DataFrame(rows)
     if len(T):
         T = T.sort_values(["frame", "id"], kind="stable").reset_index(drop=True)

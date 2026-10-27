@@ -68,7 +68,8 @@ altitude:
   cars_check: {start: 500, end: 3000, step: 40, imgsz: 1536, conf: 0.35, width_m: 1.9}
 
 heading:
-  use: false                # live: the unit's magnetic yaw (affects map positions only; distances do not need it)
+  use: true
+  source: live              # live: gyro yaw anchored causally by the fast pairs (live_height writes heading.csv); before the first anchors the gyro yaw from the first magnetic yaw
 
 detect:
   weights: G:/longrange_det/proto/weights/yolo11x.pt

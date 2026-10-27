@@ -17,6 +17,9 @@ Commands (each reads the products of the previous ones from work_dir):
                (polar_verify.json, polar_verify.jpg); --fit-colour refits the S0 colour matrix
     gui        viewer: every camera view under the HUD, click for the pixel's values and its ground point
     stabilise  stabilise.npz: a smooth virtual camera for the HUD view (hud.stabilise: true uses it)
+    replay     real-time simulation: the recording at its own pace through detection, live height and heading,
+               ranging, tracking and the presentation frame, frame by frame, in a window (--start --end --speed
+               --detect live|cached)
     live_height altitude_live.csv: height from the unit's own data only, causally (altitude.live in the config); with
                altitude.live.use the altitude track is this estimate; altitude.reference = a telemetry block to compare
     demo       out/<demo.out>: the presentation video (title, sections of the flight, closing card) from the demo block
@@ -123,14 +126,28 @@ def cmd_altitude(cfg, args, log):
         log(f"t {t0:3d}s frame {k:4d}: h {T.h.values[k]:5.1f} m ({T.src.values[k]})")
 
 
+def cmd_replay(cfg, args, log):
+    from . import replay as RP
+    from .mapview import mosaic_for_session
+    s = _session(cfg)
+    mosaic = mosaic_for_session(s, (s.E_s, s.N_s), cfg.get("map", {}), C.work(cfg, "tiles"), log)
+    dets = pd.read_csv(C.work(cfg, "dets.csv")) if args.detect == "cached" else None
+    RP.run(cfg, s, mosaic, args.start or 0, args.end, args.speed, args.detect, dets, log=log, out_csv=C.work(cfg, "replay.csv"))
+
+
 def cmd_live_height(cfg, args, log):
     from . import live_height as LH
     s = _session(cfg)
     lc = dict(cfg["altitude"].get("live") or {})
     use = lc.pop("use", False)
-    H, Fx = LH.run(s, lc, log=log)
+    H, Fx, An = LH.run(s, lc, log=log)
     H.to_csv(C.work(cfg, "altitude_live.csv"), index=False)
     Fx.to_csv(C.work(cfg, "altitude_live_fixes.csv"), index=False)
+    if cfg.get("heading", {}).get("source") == "live":               # the causal heading from the same fast pairs
+        HT = LH.heading_track(s, An)
+        HT.to_csv(C.work(cfg, "heading.csv"), index=False)
+        log(f"live heading: {len(An)} anchors; magnetic yaw error at them median "
+            f"{np.median(An.e) if len(An) else float('nan'):+.1f} deg; heading.csv written")
     first = H.h.first_valid_index()
     log(f"live height: started at frame {H.frame[first] if first is not None else None} (t {H.t[first] if first is not None else float('nan'):.1f} s); "
         f"fixes: {Fx.status.value_counts().to_dict() if len(Fx) else {}}; odometry steps ok {H.vo_ok.mean() * 100:.0f} %")
@@ -248,6 +265,10 @@ def cmd_track(cfg, args, log):
     trk = _track(cfg)
     fp = ranging.footprints(s, trk)
     T = worldtrack.run(s, R, fp, cfg.get("track"), log)
+    if not len(T):                                                    # e.g. a live run without any height: nothing ranged
+        pd.DataFrame(columns=["frame", "t", "id", "cls", "grp", "status", "E", "N", "det_row"]).to_csv(C.work(cfg, "tracks.csv"), index=False)
+        log("tracks.csv: no tracks (no detection has a ground position)")
+        return
     T = ranging.annotate_tracks(s, T, trk)
     T.to_csv(C.work(cfg, "tracks.csv"), index=False)
     feats = []
@@ -474,6 +495,8 @@ def main(argv=None):
     po = sub.add_parser("polar"); po.add_argument("--fit-colour", action="store_true")
     gu = sub.add_parser("gui"); gu.add_argument("--frame", type=int); gu.add_argument("--view", default="rgb")
     de = sub.add_parser("demo"); de.add_argument("--only", help="render only the sections whose name starts with this")
+    rp = sub.add_parser("replay"); rp.add_argument("--start", type=int); rp.add_argument("--end", type=int)
+    rp.add_argument("--speed", type=float, default=1.0); rp.add_argument("--detect", default="live", choices=["live", "cached"])
     al = sub.add_parser("all"); al.add_argument("--no-render", action="store_true")
     args = ap.parse_args(argv)
     cfg = C.load(args.config, args.work)

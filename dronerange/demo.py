@@ -103,8 +103,10 @@ class Demo:
         self._vid = None
 
     # ---- the camera picture
-    def picture(self, i, view, P=None):
-        if view == "rgb":
+    def picture(self, i, view, P=None, image=None):
+        if image is not None:
+            im = image
+        elif view == "rgb":
             if self._vid is None:
                 self._vid = self.sess.video()
             im = self._vid.read(i)
@@ -127,12 +129,12 @@ class Demo:
         return out
 
     # ---- one composed frame (without the fading titles)
-    def frame(self, i, view="rgb", P=None, section=None):
+    def frame(self, i, view="rgb", P=None, section=None, image=None):
         t = self.sess.ft[i]
         h = float(self.track.h.values[i])
         base = np.empty((H, W, 3), np.uint8)
         base[:] = PANEL
-        base[:, :CAM_W] = cv2.cvtColor(self.picture(i, view, P), cv2.COLOR_BGR2RGB)
+        base[:, :CAM_W] = cv2.cvtColor(self.picture(i, view, P, image), cv2.COLOR_BGR2RGB)
         base[:, CAM_W:CAM_W + 1] = LINE
         shown = self.shown(i)
         ov = Image.new("RGBA", (W * SS, H * SS), (0, 0, 0, 0))
@@ -143,7 +145,7 @@ class Demo:
         img = Image.fromarray(base).convert("RGBA")
         if mp is not None:
             img.paste(mp[0], mp[1], mp[2])
-        img = Image.alpha_composite(img, ov.resize((W, H), Image.LANCZOS))
+        img = Image.alpha_composite(img, ov.resize((W, H), Image.LANCZOS) if SS != 1 else ov)
         return np.asarray(img.convert("RGB"))
 
     def _labels(self, d, i, shown):
@@ -157,7 +159,8 @@ class Demo:
             head = name if unconf else f"{name} {int(r.id)}"
             still = not r.moving
             vel = "-" if unconf else f"{0 if still else round(r.speed_kmh):.0f} km/h"
-            rows = [("Xo", f"{r.Xo:.2f} m"), ("Yo", f"{r.Yo:.2f} m"), ("Zo", f"{r.Zo:.2f} m"), ("Range", f"{r.range:.2f} m"), ("Velocity", vel)]
+            m_ = lambda v: f"{v:.2f} m" if np.isfinite(v) else "-"
+            rows = [("Xo", m_(r.Xo)), ("Yo", m_(r.Yo)), ("Zo", m_(r.Zo)), ("Range", m_(r.range)), ("Velocity", vel)]
             items.append((box, lw, top + rh * len(rows) + 8))
             info.append((r, head, rows, (not still) and not unconf))
         prefer = [self.last_offset.get(int(r.id)) if int(r.id) >= 0 else None for r, _, _, _ in info]
@@ -217,7 +220,8 @@ class Demo:
         y += 12
         # stats (the tilt as measured: the real camera, not the stabilised view)
         el = angles_from_R(self.sess.R_wc(t)[None])[1][0]
-        stats = [("ALTITUDE", f"{h:.1f}", "m"), ("CAMERA TILT", f"{-math.degrees(el):.1f}", "deg"), ("DETECTED", f"{len(shown)}", "")]
+        stats = [("ALTITUDE", f"{h:.1f}" if np.isfinite(h) else "-", "m" if np.isfinite(h) else ""),
+                 ("CAMERA TILT", f"{-math.degrees(el):.1f}", "deg"), ("DETECTED", f"{len(shown)}", "")]
         cw = (xr - xl) / 3
         for k, (lab, val, unit) in enumerate(stats):
             cx = xl + k * cw
@@ -236,14 +240,14 @@ class Demo:
         y = my0 + mh + 24
         spaced(d, (xl, y), "NEAREST OBJECTS", f.txt[11], DIM + (255,), 1.0)
         n_rows = max(5, int(((820 if self.captions else 860) - (y + 22)) // 27))   # as many as the room below the map holds
-        rows = sorted([r for r, _ in shown], key=lambda r: r.range)[:n_rows]
+        rows = sorted([r for r, _ in shown], key=lambda r: r.range if np.isfinite(r.range) else 1e9)[:n_rows]
         for k, r in enumerate(rows):
             yy = y + 22 + k * 27
             col = CLASS_COL.get(r.grp, (200, 200, 200))
             d.ellipse(S(xl, yy + 6, xl + 9, yy + 15), fill=col + (255,))
             name = NAMES.get(r.cls, r.cls.upper()) + ("" if int(r.id) < 0 else f" {int(r.id)}")
             d.text(S(xl + 18, yy), name, font=f.semi[15], fill=TEXT + (255,))
-            rng = f"{r.range:.1f} m"
+            rng = f"{r.range:.1f} m" if np.isfinite(r.range) else "-"
             d.text(S(xl + 190, yy + 1), rng, font=f.num[15], fill=TEXT + (255,))
             if int(r.id) < 0:
                 sp = "-"
@@ -290,17 +294,20 @@ class Demo:
         f = self.f
         spaced(d, (x, y - 20), "ALTITUDE OVER THE FLIGHT", f.txt[11], DIM + (255,), 1.0)
         ts, hs = self.profile
-        T, Hm = ts[-1], max(35.0, float(np.nanmax(hs)))
-        k = np.linspace(0, len(ts) - 1, 300).astype(int)
+        fin = np.isfinite(hs)
+        T, Hm = ts[-1], max(35.0, float(np.max(hs[fin])) if fin.any() else 0.0)
+        k = [j for j in np.linspace(0, len(ts) - 1, 300).astype(int) if fin[j]]   # a live run: the known past only
         pts = [(x + ts[j] / T * w, y + h - hs[j] / Hm * h) for j in k]
-        d.polygon([S(*p) for p in pts] + [S(x + w, y + h), S(x, y + h)], fill=ACCENT + (38,))
-        d.line([S(*p) for p in pts], fill=ACCENT + (230,), width=int(1.6 * SS))
+        if len(pts) > 1:
+            d.polygon([S(*p) for p in pts] + [S(pts[-1][0], y + h), S(pts[0][0], y + h)], fill=ACCENT + (38,))
+            d.line([S(*p) for p in pts], fill=ACCENT + (230,), width=int(1.6 * SS))
         d.line(S(x, y + h, x + w, y + h), fill=LINE + (255,), width=SS)
         px_ = x + tt / T * w
-        hh = float(np.interp(tt, ts, hs))
-        py_ = y + h - hh / Hm * h
         d.line(S(px_, y - 2, px_, y + h), fill=(255, 255, 255, 120), width=SS)
-        d.ellipse(S(px_ - 4, py_ - 4, px_ + 4, py_ + 4), fill=(255, 255, 255, 255))
+        j = int(np.argmin(np.abs(ts - tt)))
+        if fin[j]:
+            py_ = y + h - hs[j] / Hm * h
+            d.ellipse(S(px_ - 4, py_ - 4, px_ + 4, py_ + 4), fill=(255, 255, 255, 255))
         for frac, s in ((0, "0"), (0.5, f"{T / 120:.0f} min"), (1, f"{T / 60:.0f} min")):
             tw = d.textlength(s, font=f.txt[11]) / SS
             d.text(S(x + frac * w - frac * tw, y + h + 4), s, font=f.txt[11], fill=DIM + (255,))
@@ -309,6 +316,8 @@ class Demo:
         """satellite map with the tracks; returns the (image, position, mask) to paste"""
         x, y, w, hgt = rect
         sess, hr = self.sess, self.hr
+        known = np.isfinite(h)
+        h = h if known else 30.0                                     # unknown height (live, before the first fix): frame the map only
         rmax = nice_rmax(h)
         mpp = round(max(0.3, 2.3 * rmax / w), 2)
         if mpp not in self.mapviews:
@@ -320,7 +329,8 @@ class Demo:
         ax = Rv @ np.array([0, 0, 1.0]); brg = math.degrees(math.atan2(ax[0], ax[1]))
         Gf = footprint(sess.cam, Rv, h, rmax)
         fx, fy = to_panel(E0 + Gf[:, 0], N0 + Gf[:, 1])
-        d.polygon([S(x + a, y + b) for a, b in zip(fx, fy)], fill=ACCENT + (34,), outline=ACCENT + (170,))
+        if known:
+            d.polygon([S(x + a, y + b) for a, b in zip(fx, fy)], fill=ACCENT + (34,), outline=ACCENT + (170,))
         m = (sess.ti >= t + sess.toff - 60) & (sess.ti <= t + sess.toff)
         if m.sum() > 2:
             px_, py_ = to_panel(sess.E_s[m][::9], sess.N_s[m][::9])
