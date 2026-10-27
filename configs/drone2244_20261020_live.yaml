@@ -1,0 +1,104 @@
+# LIVE variant of the 2026-10-20 session: only what the unit itself has, every filter causal; the offline height plan is
+# read only to evaluate the height. Products: G:/dx_ranging_runs/drone2244_20261020_live
+# VyzAI drone 2244, flight 2026-10-20 16:13-16:26 UTC (3971 frames at 5 fps).
+# Unit: QRB5165 + IMX253MYR (decoded 2048 x 1500, mounted inverted), Xsens MTi-8 + GNSS (u-blox class receiver).
+# Data: Google Drive folder 1L9jpJLliOZvXhjLXtuRY9K6FrLj_RjPn (only the mp4, raw/FRAMES.tsv, gnss/ and metadata/ are needed).
+name: drone2244_20261020_live
+drone_name: DRONE 2244
+data_root: G:/data/vyzai_drone_2244_20261020
+data:
+  video: 2026_10_20_16_13_23_drone_2244_2048x1500_5fps.mp4
+  frames_tsv: raw/FRAMES.tsv
+  imu: gnss/imu_gnss_2026_10_20_16_13_23.csv          # the decoded log; metadata/xsens_1792512803.bin works too
+work_dir: G:/dx_ranging_runs/drone2244_20261020_live
+enu_origin: [28.5536233, -81.5673233]                  # first GNSS fix = take-off point (the pilot stands next to it)
+position_smoothing_s: 5.0                              # drone position: GNSS low-passed + receiver velocity track
+position_smoothing_causal: true                        # live: filtered with the past only
+
+calib:
+  lens: configs/cameras/drone2244_charuco.json         # ChArUco lens (2026-10-21, focus as flown); remove to self-calibrate f, k1
+  width: 2048
+  height: 1500
+  bias_seconds: 12          # standstill on the ground at the start
+  start_frame: 1450         # pairs only at height: low hover gives translation parallax with this narrow lens
+  max_dt: 0.25
+  margin_s: 0.3
+  max_imu_gap_s: 0.05
+  max_speed: 0.25
+  min_deg: 1.0
+  max_deg: 10.0
+  n_pairs: 150
+  seed: 0
+  sift_features: 2500
+  ratio: 0.75
+  ransac_px: 3.0
+  max_points: 250
+  f0_axis_search: [3000.0, 4900.0]
+  toff_grid_ms: [-200, 200, 10.0]
+  f0_grid: [4200.0, 4900.0, 5600.0]
+
+attitude:
+  tilt_window_s: 10.0       # roll / pitch: gyro below this time scale, Xsens above (0 = Xsens as logged)
+  causal: true              # live: the slow part of the tilt from the past 10 s only
+
+altitude:
+  pairs: {step: 5, min_disp_m: 2.5, max_gap: 60, start_frame: 75, sift_features: 4000, ratio: 0.75, ransac_px: 2.0}
+  good: {max_normal_deg: 4, max_rank1: 0.15, min_inliers: 60, h_range: [2, 200], min_disp_m: 2.0}
+  smooth_window: 7
+  vo:                       # vertical odometry runs (frames), anchored at the start; h_end only for the closed variant
+    park: {start: 950, end: 2390, h_start: 8.0, h_end: 34.1, step: 2}
+    end: {start: 3290, end: 3970, h_start: 35.5, h_end: 35.5, step: 2}
+  track:                    # seconds from the first frame
+    - {until: 190, kind: const, value: 8.0, src: gnss_homography_low}   # median of the GNSS+homography pairs at 170-194 s (7.9 m)
+    - {until: 450, kind: vo, run: park, src: vertical_odometry}         # climb to the car park hover, open loop from 8.0 m
+    - {until: 480, kind: ramp, src: interp_transition}                  # climb to the street not seen by the odometry
+    - {until: 658, kind: pairs, src: gnss_homography}                   # street flight: measured directly
+    - {until: null, kind: vo_scaled, run: end, src: vertical_odometry}  # final hover, continues the last measured height
+  telemetry: null
+  live: {use: true}         # the height from the unit's own data (live_height step), nothing set by hand
+  reference:                # evaluation only: the offline height plan of this flight (pilot check -0.3..+6.4 %)
+    track_csv: G:/dx_ranging_runs/drone2244_20261020/altitude_track.csv
+    label: offline height plan (hand-built)
+    segments: {low_hover: [75, 950], climb_park: [950, 2390], street: [2390, 3290], final: [3290, 3970]}
+  cars_check: {start: 1000, end: 3960, step: 40, imgsz: 1536, conf: 0.35, width_m: 1.9}
+
+heading:
+  use: false                # live: the unit's magnetic yaw (map positions only; distances do not need it)
+  window_s: 30.0
+  min_anchors: 5
+  gap_s: 20.0
+
+detect:
+  weights: G:/longrange_det/proto/weights/yolo11x.pt   # any ultralytics detector; "yolo11x.pt" downloads the stock one
+  imgsz: 2048
+  conf: 0.15
+  classes: [0, 1, 2, 3, 5, 7]                          # person, bicycle, car, motorcycle, bus, truck
+  tracker: bytetrack.yaml
+
+track: {}                  # worldtrack.DEFAULTS can be overridden here (process noise, gates, memory, moving test)
+
+map:
+  zoom: 19
+  margin_m: 150
+  tiles_url: https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}
+
+hud:
+  labels: auto              # full | compact | auto (full for people and moving objects, compact for parked vehicles)
+  boxes: false              # draw the detection boxes too
+  map_min_m_per_px: 0.26
+  trail_s: 60
+  map_attribution: "Imagery: Esri, Maxar, Earthstar Geographics"
+
+validate:
+  pilot_max_frame: 1300                                # low hover near the take-off point
+  pilot_windows: [[284, 384], [457, 486], [516, 557], [920, 931], [993, 1201]]   # frames where the tracked person is the pilot
+  trilateration: {min_n: 15, min_span_m: 15.0}
+
+terrain:
+  use_in_ranging: false     # the site is flat (USGS 3DEP: objects within +-0.35 m of the take-off ground)
+  height_reference: takeoff # takeoff (barometric heights) or nadir (laser altimeter)
+  grid_step_m: 10.0
+
+render:
+  carpark: {start: 1640, end: 2240, fps: 5, out: drone2244_tracks_carpark.mp4}
+  full_2x: {start: 75, end: 3970, fps: 10, out: drone2244_tracks_full_2x.mp4}

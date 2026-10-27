@@ -1,0 +1,121 @@
+# LIVE variant of the 2026-10-23 session: only what the unit itself has (camera, IMU, its own GNSS), every filter
+# causal; the aircraft's flight log is read only to evaluate the height. Products: G:/dx_ranging_runs/drone2244_20261023_live
+# VyzAI drone 2244 under a DJI Matrice 600 Pro, flight 2026-10-23 18:15:55-18:25:58 UTC (3018 frames at 5 fps).
+# Camera on its own mount, 30 deg down (Brandon). The drone flew to a drain in the car park in the first ~100 s, then
+# held its place and climbed: 13.5 / 16 / ~20 / 25 / 30 m (barometer 13.1 / 16.2 / 20.0 / 25.4 / 30.2 m).
+# Data: Google Drive folder 1Gb6XY5_x_GW-TTKCmbIlrM7LzVHH4vDW (the mp4, raw/FRAMES.tsv, gnss/, metadata/, flight_log/,
+# anchors/; the raw tars of raw/ and frame_2026_10_23_18_24_19/ only for the polarisation views).
+name: drone2244_20261023_live
+drone_name: DRONE 2244
+data_root: G:/data/vyzai_drone_2244_20261023
+data:
+  video: 2026_10_23_18_15_55_drone_2244_2048x1500_5fps.mp4
+  frames_tsv: raw/FRAMES.tsv
+  imu: gnss/imu_gnss_2026_10_23_18_15_55.csv
+  flight_log: flight_log/flight_log_10hz.csv            # DJI flight record decoded: barometric height, heading
+  raw: raw                                              # layer archives of the raw frames (polarisation views): L1 1 fps, + L2 5 fps
+  reference_frame: frame_2026_10_23_18_24_19            # one raw frame with the application's own decodes of it
+work_dir: G:/dx_ranging_runs/drone2244_20261023_live
+enu_origin: [28.55378562980086, -81.56734455699014]   # DJI take-off point (the camera's first fix is already 8.9 m up)
+position_smoothing_s: 5.0
+position_smoothing_causal: true    # live: the unit's own GNSS, filtered with the past only
+
+calib:
+  lens: configs/cameras/drone2244_charuco.json
+  bias_window:              # the recording starts in flight: gyro bias from the standstill before take-off
+    csv: metadata/imu_polled_1hz_before_recording.csv
+    power_on: 2
+    t0: "2026-10-23T18:10:00"
+    t1: "2026-10-23T18:14:30"
+  width: 2048
+  height: 1500
+  bias_seconds: 12
+  start_frame: 2072         # the 30 m hold (frames 2072-2982)
+  max_dt: 0.25
+  margin_s: 0.3
+  max_imu_gap_s: 0.05
+  max_speed: 0.25
+  min_deg: 0.5
+  max_deg: 10.0
+  n_pairs: 150
+  seed: 0
+  sift_features: 2500
+  ratio: 0.75
+  ransac_px: 3.0
+  max_points: 250
+  f0_axis_search: [3000.0, 4900.0]
+  toff_grid_ms: [-200, 200, 10.0]
+  f0_grid: [4200.0, 4900.0, 5600.0]
+
+attitude:
+  tilt_window_s: 10.0
+  causal: true              # live: the slow part of the tilt from the past 10 s only
+
+altitude:
+  pairs: {step: 5, min_disp_m: 2.5, max_gap: 60, start_frame: 0, end_frame: 520, sift_features: 4000, ratio: 0.75, ransac_px: 2.0}   # the flight to the drain
+  good: {max_normal_deg: 4, max_rank1: 0.15, min_inliers: 60, h_range: [2, 200], min_disp_m: 2.0}
+  smooth_window: 7
+  vo:                       # visual odometry over the climbs, a check against the barometer
+    climbs: {start: 1150, end: 2120, h_start: 13.1, h_end: 30.2, step: 2}
+  track: []
+  live: {use: true}         # the height from the unit's own data (live_height step), no aircraft log, nothing set by hand
+  reference:                # evaluation only: the aircraft's barometer
+    source: flight_log
+    h_col: height_above_takeoff_m
+    offset_s: 1.25
+    label: aircraft barometer (DJI log)
+    segments: {approach: [0, 520], low_hold: [520, 1150], climbs: [1150, 2072], hold30: [2072, 2982]}
+  cars_check: {start: 500, end: 3000, step: 40, imgsz: 1536, conf: 0.35, width_m: 1.9}
+
+heading:
+  use: false                # live: the unit's magnetic yaw (affects map positions only; distances do not need it)
+
+detect:
+  weights: G:/longrange_det/proto/weights/yolo11x.pt
+  imgsz: 2048
+  conf: 0.15
+  classes: [0, 1, 2, 3, 5, 7]
+  tracker: bytetrack.yaml
+
+track: {}
+
+map:
+  zoom: 19
+  margin_m: 150
+  tiles_url: https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}
+
+polar:
+  s0_colour: configs/cameras/drone2244_s0_colour.json   # colour matrix of the S0 view (polar --fit-colour)
+  workers: 4                                            # raw-frame decoders (about 0.3 s per frame each)
+
+stabilise:                  # smooth virtual camera for the HUD view (the stabilise step -> stabilise.npz)
+  zoom: 1.25                # the view shows 80 % of the frame: the margin absorbs the shake
+  turn_share: 0.6           # of the margin for the turn to the smoothed orientation (gyro attitude)
+  residual_share: 0.35      # for the shift the turn leaves (the drone's sway), from the images
+  roll_deg: 0.4
+  w1: 1.0                   # weight of stillness against smooth motion
+
+hud:
+  labels: full              # every detection with Xo / Yo / Zo / Range / Velocity (auto: compact for parked vehicles)
+  stabilise: true           # use stabilise.npz for the camera view
+  boxes: false              # draw the detection boxes too
+  map_min_m_per_px: 0.26
+  trail_s: 60
+  map_attribution: "Imagery: Esri, Maxar, Earthstar Geographics"
+
+validate:
+  pilot_max_frame: 520
+  pilot_windows: []
+  trilateration: {min_n: 15, min_span_m: 15.0}
+
+terrain:
+  use_in_ranging: false
+  height_reference: takeoff
+  grid_step_m: 10.0
+
+render:
+  hold30: {start: 2072, end: 2982, fps: 5, out: drone2244_1023_hold30.mp4}
+  climbs: {start: 1150, end: 2120, fps: 5, out: drone2244_1023_climbs.mp4}
+  full_2x: {start: 0, end: 3017, fps: 10, out: drone2244_1023_full_2x.mp4}
+  hold30_views: {start: 2072, end: 2982, fps: 5, view: tour, tour_s: 6, out: drone2244_1023_hold30_views.mp4}   # needs the raw frames
+

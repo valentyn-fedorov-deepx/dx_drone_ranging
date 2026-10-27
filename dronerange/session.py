@@ -155,23 +155,25 @@ class Session:
         self.toff = float(c["imu_time_offset_s"])
         self.gyro_scale = float(c.get("gyro_scale", 1.0))
         self.set_bias(c["gyro_bias_rad_s"])
-        w = self.cfg.get("attitude", {}).get("tilt_window_s", 10.0)
+        att = self.cfg.get("attitude", {})
+        w = att.get("tilt_window_s", 10.0)
         if w:
-            self.fuse_tilt(w)
+            self.fuse_tilt(w, causal=att.get("causal", False))
         return self
 
-    def fuse_tilt(self, window_s=10.0):
+    def fuse_tilt(self, window_s=10.0, causal=False):
         """Complementary roll and pitch: the gyro orientation for everything faster than window_s, the Xsens roll and
         pitch (gravity-referenced, but off by about 1 deg over a few seconds in hover) for the slow part. The world up
         vector seen in the body (from the Xsens) is carried into the gyro's reference frame, where it should stand
-        still, averaged over the window (centred), and brought back to the body. The yaw is left alone."""
+        still, averaged over the window (centred, or the window_s before each sample with causal=True: what a live
+        run has), and brought back to the body. The yaw is left alone."""
         Rg = self.slerp(self.ti).as_matrix()
         r = np.radians(self.eul_raw[:, 0]); p = np.radians(self.eul_raw[:, 1])
         u = np.c_[-np.sin(p), np.sin(r) * np.cos(p), np.cos(r) * np.cos(p)]
         w = np.einsum("nij,nj->ni", Rg, u)
         cs = np.vstack([np.zeros(3), np.cumsum(w, axis=0)])
-        lo = np.searchsorted(self.ti, self.ti - window_s / 2)
-        hi = np.searchsorted(self.ti, self.ti + window_s / 2, side="right")
+        lo = np.searchsorted(self.ti, self.ti - (window_s if causal else window_s / 2))
+        hi = np.arange(1, len(self.ti) + 1) if causal else np.searchsorted(self.ti, self.ti + window_s / 2, side="right")
         wf = (cs[hi] - cs[lo]) / (hi - lo)[:, None]
         wf /= np.linalg.norm(wf, axis=1, keepdims=True)
         uf = np.einsum("nji,nj->ni", Rg, wf)

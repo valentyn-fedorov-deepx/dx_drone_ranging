@@ -17,6 +17,8 @@ Commands (each reads the products of the previous ones from work_dir):
                (polar_verify.json, polar_verify.jpg); --fit-colour refits the S0 colour matrix
     gui        viewer: every camera view under the HUD, click for the pixel's values and its ground point
     stabilise  stabilise.npz: a smooth virtual camera for the HUD view (hud.stabilise: true uses it)
+    live_height altitude_live.csv: height from the unit's own data only, causally (altitude.live in the config); with
+               altitude.live.use the altitude track is this estimate; altitude.reference = a telemetry block to compare
     demo       out/<demo.out>: the presentation video (title, sections of the flight, closing card) from the demo block
     all        frames, calib, altitude, heading, detect, range, track, validate, render (all presets)
 """
@@ -119,6 +121,58 @@ def cmd_altitude(cfg, args, log):
     for t0 in (100, 200, 260, 300, 400, 450, 470, 500, 600, 700, 790):
         k = int(np.argmin(np.abs(T.t.values - t0)))
         log(f"t {t0:3d}s frame {k:4d}: h {T.h.values[k]:5.1f} m ({T.src.values[k]})")
+
+
+def cmd_live_height(cfg, args, log):
+    from . import live_height as LH
+    s = _session(cfg)
+    lc = dict(cfg["altitude"].get("live") or {})
+    use = lc.pop("use", False)
+    H, Fx = LH.run(s, lc, log=log)
+    H.to_csv(C.work(cfg, "altitude_live.csv"), index=False)
+    Fx.to_csv(C.work(cfg, "altitude_live_fixes.csv"), index=False)
+    first = H.h.first_valid_index()
+    log(f"live height: started at frame {H.frame[first] if first is not None else None} (t {H.t[first] if first is not None else float('nan'):.1f} s); "
+        f"fixes: {Fx.status.value_counts().to_dict() if len(Fx) else {}}; odometry steps ok {H.vo_ok.mean() * 100:.0f} %")
+    ref = cfg["altitude"].get("reference")
+    if ref and (ref.get("source") or ref.get("track_csv")):
+        if ref.get("source"):                                         # the aircraft's log
+            from . import telemetry as TM
+            D = TM.load(cfg["data"][ref["source"]], ref.get("t_col", "utc"), ref.get("offset_s", 0.0))
+            href = np.interp(s.ft, D.t_unix.values, D[ref.get("h_col", "height_above_takeoff_m")].values)
+        else:                                                         # another run's height track, per frame
+            D = pd.read_csv(ref["track_csv"])
+            href = np.interp(np.arange(s.n_frames), D.frame.values, D.h.values)
+        H["h_ref"] = href[H.frame.values]
+        e = 100 * (H.h / H.h_ref - 1)
+        H["err_pct"] = e
+        H.to_csv(C.work(cfg, "altitude_live.csv"), index=False)
+        for name, a, b in [("all", 0, 10 ** 9)] + [(k, v[0], v[1]) for k, v in (ref.get("segments") or {}).items()]:
+            m = (H.frame >= a) & (H.frame <= b) & H.h.notna()
+            if m.any():
+                log(f"  {name:12s} frames {max(a, int(H.frame[m].min()))}-{min(b, int(H.frame[m].max()))}: live vs reference median {e[m].median():+.1f} %, "
+                    f"p5 {e[m].quantile(.05):+.1f}, p95 {e[m].quantile(.95):+.1f} %, |err| median {e[m].abs().median():.1f} %")
+        try:
+            import matplotlib
+            matplotlib.use("Agg")
+            import matplotlib.pyplot as plt
+            fig, ax = plt.subplots(2, 1, figsize=(12, 7), sharex=True)
+            ax[0].plot(H.t, H.h_ref, color="0.5", lw=1.5, label=ref.get("label", "reference"))
+            ax[0].plot(H.t, H.h, color="C0", lw=1.2, label="live estimate (unit only)")
+            if len(Fx):
+                u = Fx[Fx.status.isin(["used", "start"])]
+                ax[0].scatter(u.t, u.h_fix, s=8, color="C2", label="GNSS + homography fixes")
+            ax[0].set_ylabel("height (m)"); ax[0].legend(); ax[0].grid(alpha=.3)
+            ax[1].plot(H.t, e, color="C3", lw=1); ax[1].axhline(0, color="0.5", lw=.8)
+            ax[1].set_ylabel("error (%)"); ax[1].set_xlabel("s from the first frame"); ax[1].grid(alpha=.3); ax[1].set_ylim(-30, 30)
+            fig.tight_layout(); fig.savefig(C.work(cfg, "altitude_live.png"), dpi=110); plt.close(fig)
+        except Exception as ex:
+            log("plot:", ex)
+    if use:
+        T = pd.DataFrame(dict(frame=np.arange(s.n_frames), t=s.ft - s.ft[0], h=np.nan, src="live"))
+        T.loc[H.frame.values, "h"] = H.h.values
+        T.to_csv(C.work(cfg, "altitude_track.csv"), index=False)
+        log("altitude_track.csv <- the live estimate (no height before its first fixes)")
 
 
 def _track(cfg):
@@ -407,7 +461,7 @@ def main(argv=None):
     ap.add_argument("--config", required=True)
     ap.add_argument("--work", help="override work_dir")
     sub = ap.add_subparsers(dest="cmd", required=True)
-    for name in ("frames", "calib", "heading", "cars", "detect", "track", "validate", "terrain", "stabilise"):
+    for name in ("frames", "calib", "heading", "cars", "detect", "track", "validate", "terrain", "stabilise", "live_height"):
         sub.add_parser(name)
     ln = sub.add_parser("lens"); ln.add_argument("--src"); ln.add_argument("--name"); ln.add_argument("--out")
     a = sub.add_parser("altitude"); a.add_argument("--reuse", action="store_true", help="reuse altitude_pairs / altitude_vo csv files")
