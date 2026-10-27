@@ -312,7 +312,21 @@ Real-time simulation (`replay`): the estimator, the ranging and the tracker run 
 recording plays at its own pace and a frame the chain cannot keep up with is dropped. On 10-20 (frame 2200 to the end)
 a frame takes 189 ms median, 236 ms p95, of the 200 ms of a 5 fps frame (detection 60 ms on the GPU side by side with
 the height 142 ms on the CPU, tracking 8 ms, drawing 38 ms); 6.5 % of the frames were dropped and the height locked at
-the same frame as in the batch run.
+the same frame as in the batch run. `replay --record` runs the same chain over every frame and writes the screen to a
+video: until the first fast pass the altitude and the distances show "-" and the map shows the drone as a dot, since
+neither the height nor the heading is known yet.
+
+What a calibration pass needs follows from the thresholds: three non-overlapping fixes of >= 5 m at >= 3 m/s, so about
+4 s of straight flight at 5-7 m/s (10-20: 5 s after the drone passed 3 m/s, about 30 m); the image condition (>= 12 %
+of the height over a window that ends just past 5 m) caps the fix height at about 42-50 m, so a pass above that gives
+no fix and the height has to be carried up by the odometry (checked against the barometer on 10-23 with an ideal
+calibration at 13.1 m: -2.2 % after the climbs to 30 m, -0.5 to -1.2 % in the 30 m hold, -4.5 % on the final descent,
+6 min in all). In the batch run the first 18 s after the 10-20 lock wandered between 33 and 39 m: the lock came during a
+climb, and frames 2320-2351 of the recording hold two extra frame streams interleaved with the 5 fps one (10 fps for 3 s,
+every other frame 60 ms away showing another moment, a view the IMU does not show; the detector then picks up a far car
+park). This is a recorder artefact, not flight: `skip_frames` leaves those frames out of the replay, as a live run on
+the camera's own stream would never see them. 10-23 has three shorter stretches of the same kind (frames 1444-1453,
+1613-1628, 2944-2947).
 
 Open: an accelerometer scale for vertical flights (the vertical double integral of the specific force against the
 odometry over a climb start / stop gives the height; prototype on 10-23: most windows within 10 % of the barometer,
@@ -320,7 +334,7 @@ one climb wrong), a lighter feature detector for the device.
 
 ## 11. Limits
 
-- Height enters 1:1. Live use needs the flight controller's barometric or laser height; the visual height lags during
+- Height enters 1:1. Live, it comes from fast passes (section 10) or the flight controller's barometric or laser height; the visual height lags during
   fast climbs (parked cars then appear to move for a few seconds), and the vertical odometry still reads climbs about
   9 % short (barometer check, 10-23).
 - The unit's GNSS receiver is unreliable on the drone: its height drifted on both flights and on 10-23 its horizontal

@@ -27,3 +27,13 @@ def test_heading_track_is_causal_and_robust():
     assert abs(H.c.values[445] + 25.0) < 1e-9                         # median of the first three
     assert abs(H.c.values[-1] + 25.0) < 0.6                           # the outlier at 60 deg is left out
     assert np.allclose(H.yaw_used.values, H.yaw_gyro.values + H.c.values)
+
+
+def test_live_heading_known_after_three_anchors():
+    import types
+    est = types.SimpleNamespace(anchors=[], c=0.0, heading_known=False)   # the estimator's heading state only
+    for n, (t, c) in enumerate([(100.0, -157.0), (101.0, -158.0), (102.0, -157.5)]):
+        est.anchors.append(dict(t_imu=t, c=c))
+        live_height.LiveHeight._update_heading(est)
+        assert est.heading_known == (n == 2)                          # a dot on the map until the third anchor
+    assert abs(est.c + 157.5) < 1e-9

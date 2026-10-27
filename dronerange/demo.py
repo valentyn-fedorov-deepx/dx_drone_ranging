@@ -329,7 +329,8 @@ class Demo:
         ax = Rv @ np.array([0, 0, 1.0]); brg = math.degrees(math.atan2(ax[0], ax[1]))
         Gf = footprint(sess.cam, Rv, h, rmax)
         fx, fy = to_panel(E0 + Gf[:, 0], N0 + Gf[:, 1])
-        if known:
+        dir_known = getattr(sess.heading, "known", True)            # live: no heading before the first fast pass
+        if known and dir_known:
             d.polygon([S(x + a, y + b) for a, b in zip(fx, fy)], fill=ACCENT + (34,), outline=ACCENT + (170,))
         m = (sess.ti >= t + sess.toff - 60) & (sess.ti <= t + sess.toff)
         if m.sum() > 2:
@@ -350,10 +351,13 @@ class Demo:
             else:
                 d.ellipse(S(x + X - rad, y + Y - rad, x + X + rad, y + Y + rad), outline=col + (150,), width=int(1.5 * SS))
         DX, DY = to_panel(E0, N0)
-        b = math.radians(brg)
-        tri = [(DX + math.sin(b) * 11, DY - math.cos(b) * 11), (DX + math.sin(b + 2.5) * 8, DY - math.cos(b + 2.5) * 8),
-               (DX + math.sin(b - 2.5) * 8, DY - math.cos(b - 2.5) * 8)]
-        d.polygon([S(x + a, y + bb) for a, bb in tri], fill=(255, 255, 255, 255), outline=(0, 0, 0, 255))
+        if dir_known:
+            b = math.radians(brg)
+            tri = [(DX + math.sin(b) * 11, DY - math.cos(b) * 11), (DX + math.sin(b + 2.5) * 8, DY - math.cos(b + 2.5) * 8),
+                   (DX + math.sin(b - 2.5) * 8, DY - math.cos(b - 2.5) * 8)]
+            d.polygon([S(x + a, y + bb) for a, bb in tri], fill=(255, 255, 255, 255), outline=(0, 0, 0, 255))
+        else:                                                        # where the drone is, not where it looks
+            d.ellipse(S(x + DX - 6, y + DY - 6, x + DX + 6, y + DY + 6), fill=(255, 255, 255, 255), outline=(0, 0, 0, 255), width=SS)
         sb = 50 if mpp * w > 220 else 25
         d.rectangle(S(x + 12, y + hgt - 18, x + 12 + sb / mpp, y + hgt - 15), fill=(255, 255, 255, 220))
         d.text(S(x + 12, y + hgt - 36), f"{sb} m", font=self.f.txt[11], fill=(255, 255, 255, 230))

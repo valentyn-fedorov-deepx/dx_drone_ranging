@@ -88,6 +88,7 @@ class LiveHeight:
         self.last_fix = -1                                          # frame of the last fix: windows do not overlap
         self.yg = gyro_yaw(sess)                                    # heading anchors: the yaw used in the pairs vs the gyro yaw
         self.c = 0.0                                                # live heading correction (deg) on top of the gyro yaw
+        self.heading_known = False                                  # True once the anchors have set the correction
         self.processed = []
 
     def gE(self, t):
@@ -132,6 +133,7 @@ class LiveHeight:
         w = cv[m]; c0 = float(np.median(wrap(w))); w = c0 + wrap(w - c0)
         med = np.median(w); mad = 1.4826 * np.median(np.abs(w - med))
         self.c = float(np.median(w[np.abs(w - med) <= max(3 * mad, 6.0)]))
+        self.heading_known = True
 
     def step(self, k, gray=None):
         P, sess, ft, L = self.P, self.sess, self.sess.ft, self.L

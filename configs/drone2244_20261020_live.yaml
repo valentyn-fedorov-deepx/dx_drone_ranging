@@ -112,3 +112,15 @@ demo:                       # presentation video of the live run: from the first
   sections:
     - {kind: video, name: "Street flight", start: 2283, end: 3289, step: 1, hold: 3}    # 2x speed
     - {kind: video, name: "Final hover", start: 3290, end: 3589}
+
+# recorder artefact: 16:21:11.2-14.1 the recording holds two extra frame streams between the 5 fps one (10 fps for 3 s,
+# every other frame 60 ms away showing another moment, a view the IMU does not show); the frames kept continue the 0.2 s
+# cadence. The replay (and its video) leave these out; the batch steps still use every frame.
+skip_frames: [2320, 2322, 2324, 2326, 2328, 2330, 2332, 2334, 2336, 2338, 2339, 2341, 2342, 2344, 2345, 2347, 2349, 2351]
+
+live_video:                 # replay --record: the live screen, causal, no stabilisation (it looks ahead), every frame
+  out: drone2244_1020_live_view.mp4
+  sections:                 # [first frame, last frame, output frames per camera frame: 6 = real time, 3 = 2x]
+    - [2170, 2420, 6]       # hover without a height, the first fast pass: the height, the distances and the heading appear
+    - [2421, 3289, 3]       # street flight
+    - [3290, 3589, 6]       # final hover

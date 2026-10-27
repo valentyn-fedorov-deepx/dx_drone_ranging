@@ -38,7 +38,7 @@ can be run on its own (`python -m dronerange --config ... <step>`); every produc
 | `stabilise` | `stabilise.npz`: a smooth virtual camera for the HUD view (gyro turn + image residual inside the margin of a 1.25 zoom); `hud.stabilise: true` makes render and gui use it |
 | `demo` | `out/<demo.out>`: the presentation video (1920 x 1080, 30 fps): title, sections of the flight, closing card, from the config's `demo` block (`--only <section>` for one section) |
 | `live_height` | `altitude_live.csv`: the height from the unit's own data only, causally (`altitude.live`); with `use: true` it becomes the altitude track; with `heading.source: live` it also writes the causal heading (`heading.csv`) |
-| `replay` | real-time simulation in a window: the recording at its own pace, every frame through detection (YOLO on the GPU, or `--detect cached`), live height and heading, ranging, tracking and the presentation frame; frames it cannot keep up with are dropped; `replay.csv` (`--start --end --speed`) |
+| `replay` | real-time simulation in a window: the recording at its own pace, every frame through detection (YOLO on the GPU, or `--detect cached`), live height and heading, ranging, tracking and the presentation frame; frames it cannot keep up with are dropped; `replay.csv` (`--start --end --speed`); `--record`: the same chain over every frame of the config's `live_video` sections, no clock and no drops, written to `out/` as a video |
 
 Data for the 2026-10-20 session (Google Drive folder `1L9jpJLliOZvXhjLXtuRY9K6FrLj_RjPn`): the mp4, `raw/FRAMES.tsv`
 (frame times), `gnss/imu_gnss_*.csv` (or `metadata/xsens_*.bin`); the raw tars only for the polarisation views. The ChArUco takes of
@@ -152,6 +152,28 @@ frame allows; 116 of 1771 frames dropped, at most 0.6 s behind; the height locks
 ```bash
 python -m dronerange --config configs/drone2244_20261020_live.yaml replay --start 2200
 ```
+
+**The live screen as a video** (`replay --record`): the same frame-by-frame chain written to a video, without the
+stabilisation (it looks ahead). Before the first fast pass the altitude, the distances and the velocities show "-" and
+the map shows the drone as a dot (no heading yet); the pass brings the height, the distances, the map footprint and the
+heading arrow together. 10-20: `out/drone2244_1020_live_view.mp4` (hover without a height, the first pass and the lock
+at frame 2283 in real time, the street flight at 2x, the final hover). `skip_frames` leaves out frames that are not in
+the camera's 5 fps stream: 10-20 frames 2320-2351 hold two extra interleaved frame streams (a recorder artefact, 10 fps
+for 3 s, every other frame showing another moment).
+
+```bash
+python -m dronerange --config configs/drone2244_20261020_live.yaml replay --record --detect cached
+```
+
+**Flying for the live mode** (what the estimator needs, from its thresholds and the two flights):
+- power the unit and start recording on the ground, the drone still for 15 s (the gyro bias is taken from the first
+  12 s), and wait for the unit's GNSS fix;
+- calibration pass at 25-40 m: straight, level, 5-6 m/s (>= 3 m/s counts; the fixes on 10-20 were 4.4-7.9 m/s) for
+  about 10 s, over open flat ground (car park, field, wide road; the ground 50-110 m ahead fills the view); the height
+  appears about 4 s after the drone reaches speed (three fixes of >= 5 m each);
+- the fixes need the images to move by >= 12 % of the height over a 5-6 m window, so above about 45 m a pass gives no
+  fix (climb after the pass instead: the odometry carries the height, 13 -> 30 m read 2 % low on 10-23);
+- repeat a short pass every few minutes and after large height changes; hovering and turning keep the last height.
 
 ## Layout
 

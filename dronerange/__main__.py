@@ -132,6 +132,14 @@ def cmd_replay(cfg, args, log):
     s = _session(cfg)
     mosaic = mosaic_for_session(s, (s.E_s, s.N_s), cfg.get("map", {}), C.work(cfg, "tiles"), log)
     dets = pd.read_csv(C.work(cfg, "dets.csv")) if args.detect == "cached" else None
+    if args.record:                                                  # the live screen written to a video: every frame, no clock
+        lv = cfg["live_video"]
+        secs = [tuple(x) for x in lv["sections"]]
+        out = lv.get("out", "live_view.mp4")
+        out = out if os.path.isabs(out) else C.work(cfg, os.path.join("out", out))
+        RP.run(cfg, s, mosaic, secs[0][0], secs[-1][1], detect=args.detect, dets=dets, log=log, out_csv=C.work(cfg, "live_view.csv"),
+               record=(out, secs))
+        return
     RP.run(cfg, s, mosaic, args.start or 0, args.end, args.speed, args.detect, dets, log=log, out_csv=C.work(cfg, "replay.csv"))
 
 
@@ -497,6 +505,7 @@ def main(argv=None):
     de = sub.add_parser("demo"); de.add_argument("--only", help="render only the sections whose name starts with this")
     rp = sub.add_parser("replay"); rp.add_argument("--start", type=int); rp.add_argument("--end", type=int)
     rp.add_argument("--speed", type=float, default=1.0); rp.add_argument("--detect", default="live", choices=["live", "cached"])
+    rp.add_argument("--record", action="store_true", help="write the live screen of the config's live_video sections to a video")
     al = sub.add_parser("all"); al.add_argument("--no-render", action="store_true")
     args = ap.parse_args(argv)
     cfg = C.load(args.config, args.work)

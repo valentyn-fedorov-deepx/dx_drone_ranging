@@ -4,7 +4,8 @@ the live height and heading, ranging, the tracker, and the presentation frame, s
 keep up with is dropped, as live. Detection (GPU) and the height (CPU) of a frame run side by side, as a device would
 pipeline them; the clock starts after the first frame (the detector's warm-up). No stabilisation (the stabilised path
 looks ahead). The window title shows what each stage costs and how far the chain is behind real time; a summary is
-logged at the end.
+logged at the end. With record, the same chain runs every frame without the clock and writes the frames to a video
+(what the live screen shows, without the drops of this PC).
 """
 import math
 import time
@@ -81,6 +82,11 @@ class LiveYaw:
     def yaws(self, t):
         return np.array([self.est.yaw(x) for x in np.atleast_1d(t)])
 
+    @property
+    def known(self):
+        """anchored by a fast pass (before it the gyro yaw starts from the magnetic yaw, which can be off by any angle)"""
+        return self.est.heading_known
+
 
 class IdentityView:
     """the camera picture scaled to the presentation view, no turn (the stabiliser's interface)"""
@@ -125,10 +131,13 @@ class StreamRenderer(HudRenderer):
     def _centre_cand(self, i):
         if i not in self._cand:
             t = self.sess.ft[i]
-            h = float(self.track.h.values[i]); h = h if np.isfinite(h) else 30.0
+            h = float(self.track.h.values[i])
             E0, N0 = self.sess.drone_EN(t, smooth=True)
-            Gf = footprint(self.sess.cam, self.sess.R_wc(t), h, nice_rmax(h))
-            self._cand[i] = np.array([E0 + 0.5 * Gf[:, 0].mean(), N0 + 0.5 * Gf[:, 1].mean()])
+            if not np.isfinite(h):                                   # no height yet: the map centres on the drone
+                self._cand[i] = np.array([E0, N0])
+            else:
+                Gf = footprint(self.sess.cam, self.sess.R_wc(t), h, nice_rmax(h))
+                self._cand[i] = np.array([E0 + 0.5 * Gf[:, 0].mean(), N0 + 0.5 * Gf[:, 1].mean()])
         return self._cand[i]
 
 
@@ -161,9 +170,20 @@ def _unranged(det, start_row):
     return out
 
 
-def run(cfg, sess, mosaic, start=0, end=None, speed=1.0, detect="live", dets=None, window=(1600, 900), log=print, out_csv=None):
+def run(cfg, sess, mosaic, start=0, end=None, speed=1.0, detect="live", dets=None, window=(1600, 900), log=print, out_csv=None,
+        record=None):
+    """record: None = the real-time window; or (path, sections) = every frame from start to end through the same chain,
+    no clock and no drops, and the frames of the sections written to a video; sections = [(first frame, last frame,
+    output frames per camera frame)], 6 = real time at 30 fps, 3 = 2x"""
     end = sess.n_frames - 1 if end is None else min(end, sess.n_frames - 1)
-    D.SS = 1                                                         # live: no supersampling of the overlays (speed)
+    live = record is None
+    if live:
+        D.SS = 1                                                     # live: no supersampling of the overlays (speed)
+    vo, hold_of, last_out, last_k, fade = None, {}, None, None, int(0.5 * D.FPS)
+    if not live:
+        vo = D.VideoOut(record[0])
+        for a, b, hold in record[1]:
+            hold_of.update({f: (int(hold), a) for f in range(a, b + 1)})
     est = LiveHeight(sess, {**(cfg["altitude"].get("live") or {}), "feature_scale": 0.5, "features": 1500})
     est.P.pop("use", None)
     sess.heading = LiveYaw(est)
@@ -177,7 +197,7 @@ def run(cfg, sess, mosaic, start=0, end=None, speed=1.0, detect="live", dets=Non
     vid = cv2.VideoCapture(cfg["data"]["video"])
     vid.set(cv2.CAP_PROP_POS_FRAMES, start)
     name = "dronerange live"
-    win = _Window(name, window)
+    win = _Window(name, window) if live else None
     ft = sess.ft
     stats, dropped, processed, lag_max = defaultdict(list), 0, 0, 0.0
     next_row = 0
@@ -186,15 +206,19 @@ def run(cfg, sess, mosaic, start=0, end=None, speed=1.0, detect="live", dets=Non
     wall0 = None
     k = start
     paused_at = None
+    skip = set(cfg.get("skip_frames") or [])                         # not in the camera's 5 fps stream (recorder artefact)
     while k <= end:
+        if k in skip:
+            vid.grab(); k += 1
+            continue
         target = (ft[k] - ft[start]) / speed
         now = time.perf_counter() - wall0 if wall0 is not None else 0.0
-        if wall0 is not None and now > target + 1.5 * 0.2 / speed and k < end:   # behind real time: drop this frame, as live
+        if live and wall0 is not None and now > target + 1.5 * 0.2 / speed and k < end:   # behind real time: drop this frame, as live
             vid.grab(); k += 1; dropped += 1
             continue
-        if now < target:
+        if live and now < target:
             win.wait(target - now)
-        if not win.open:
+        if live and not win.open:
             break
         ok, im = vid.read()
         if not ok:
@@ -244,6 +268,19 @@ def run(cfg, sess, mosaic, start=0, end=None, speed=1.0, detect="live", dets=Non
             for st, v in zip(STAGES + ("frame",), (tb - ta, tc - ta, td - tc_all, te - td, te - ta)):
                 stats[st].append(v)
         processed += 1
+        if not live:
+            if k in hold_of:
+                hold, first = hold_of[k]
+                if k == first and (last_out is None or k - last_k > 1):   # fade in from black / cross-fade over a gap
+                    a0 = last_out if last_out is not None else np.zeros_like(comp)
+                    for j in range(1, fade + 1):
+                        vo.put(D.blend(a0, comp, j / (fade + 1)))
+                vo.put(comp, hold)
+                last_out, last_k = comp, k
+            if processed % 100 == 0:
+                log(f"record: frame {k}, height {'%.1f m' % h if h is not None else 'unknown'}")
+            k += 1
+            continue
         win.show(cv2.cvtColor(comp, cv2.COLOR_RGB2BGR),
                  f"{name}  |  frame {k}  |  detect {1000 * (tb - ta):.0f} ms  height {1000 * (tc - ta):.0f} ms (side by side)  "
                  f"track {1000 * (td - tc_all):.0f} ms  draw {1000 * (te - td):.0f} ms  |  frame {1000 * (te - ta):.0f} ms of {200 / speed:.0f}  |  "
@@ -259,7 +296,14 @@ def run(cfg, sess, mosaic, start=0, end=None, speed=1.0, detect="live", dets=Non
         if not win.open:
             break
         k += 1
-    win.w.close()
+    if win is not None:
+        win.w.close()
+    if vo is not None:
+        if last_out is not None:                                     # fade out
+            for j in range(fade):
+                vo.put(D.blend(last_out, np.zeros_like(last_out), (j + 1) / fade))
+        vo.close()
+        log(f"{record[0]}: {vo.n / D.FPS:.1f} s")
     pool.shutdown(wait=False)
     if out_csv:
         pd.DataFrame(per_frame).to_csv(out_csv, index=False)
