@@ -225,6 +225,7 @@ class HudRenderer:
     def _centre_cand(self, i):
         if i not in self._cand:
             t, Rwc, h, _, E0, N0 = self.geometry(i)
+            h = h if np.isfinite(h) else 30.0                       # no height yet (live): frame the map only
             Gf = footprint(self.sess.cam, Rwc, h, nice_rmax(h))
             self._cand[i] = np.array([E0 + 0.5 * Gf[:, 0].mean(), N0 + 0.5 * Gf[:, 1].mean()])
         return self._cand[i]
